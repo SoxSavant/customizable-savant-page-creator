@@ -74,8 +74,10 @@ TEAMS = {
     "TOR": "Toronto Blue Jays",    "WSN": "Washington Nationals"
 }
 
+TRUTHY_STRINGS = {"true", "1", "yes", "y", "t"}
+
 DEFAULT_STATS = [
-    "WAR", "Off", "Def", "BsR", "xwOBA", "xBA", "xSLG", "EV", "Barrel%", 
+    "WAR", "Off", "BsR", "Def", "xwOBA", "xBA", "xSLG", "EV", "Barrel%", 
      "HardHit%", "O-Swing%", "Whiff%", "K%", "BB%"
 ]
 
@@ -137,7 +139,7 @@ with left_col.form("controls"):
         index=default_index,
         key=team_select_key,
     )
-    min_pa = st.number_input("Min Plate Appearances (for *team* leader)", 0, 800, 502)
+    min_pa = st.number_input("Min Plate Appearances (for *team* leader)", 0, 800, 340)
     submitted = st.form_submit_button("Update")
 
 stat_builder_container = left_col.container()
@@ -239,7 +241,6 @@ def normalize_stat_rows(rows, fallback):
     """Clean incoming rows into a valid stat config list."""
     cleaned = []
     seen_stats = set()
-    truthy_strings = {"true", "1", "yes", "y", "t"}
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -254,7 +255,7 @@ def normalize_stat_rows(rows, fallback):
         if pd.isna(show_val):
             show_bool = True
         elif isinstance(show_val, str):
-            show_bool = show_val.strip().lower() in truthy_strings
+            show_bool = show_val.strip().lower() in TRUTHY_STRINGS
         else:
             show_bool = bool(show_val)
         cleaned.append({"Stat": stat_name, "Show": show_bool})
@@ -320,7 +321,13 @@ with stat_builder_container:
     if "Stat" not in stat_config_df.columns:
         stat_config_df["Stat"] = default_stat_config[0]["Stat"]
     stat_config_df = stat_config_df[["Show", "Stat"]].copy()
-    stat_config_df["Show"] = stat_config_df["Show"].fillna(True)
+    stat_config_df["Show"] = stat_config_df["Show"].apply(
+        lambda val: True
+        if pd.isna(val)
+        else val.strip().lower() in TRUTHY_STRINGS
+        if isinstance(val, str)
+        else bool(val)
+    )
     stat_config_df.insert(0, "Drag", ["↕"] * len(stat_config_df))
 
     gb = GridOptionsBuilder.from_dataframe(stat_config_df)
@@ -338,6 +345,8 @@ with stat_builder_container:
         suppressMovableColumns=True,
         suppressRowClickSelection=True,
         rowSelection="single",
+        singleClickEdit=True,
+        stopEditingWhenCellsLoseFocus=True,
     )
     gb.configure_column(
         "Drag",
@@ -352,8 +361,7 @@ with stat_builder_container:
         "Show",
         header_name="Show",
         cellRenderer="agCheckboxCellRenderer",
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": [True, False]},
+        cellEditor="agCheckboxCellEditor",
         width=100,
         suppressMenu=True,
     )
@@ -432,6 +440,7 @@ label_map = {
     "WAR": "fWAR",
     "O-Swing%": "Chase%",
     "Whiff%": "Whiff%",
+    "EV": "Avg Exit Velo",
 }
 lower_better = {"K%", "O-Swing%", "Whiff%"}
 
