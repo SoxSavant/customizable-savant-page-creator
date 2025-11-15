@@ -42,10 +42,10 @@ if not st.session_state.get(CSS_KEY):
     st.markdown(
         """
         <style>
-        [aria-label*="Select row"],
-        [aria-label*="Select row"] + div,
-        [aria-label*="Select all rows"],
-        [aria-label*="Select all rows"] + div {
+        div.ag-pinned-left-cols-container [aria-label*="Select row"],
+        div.ag-pinned-left-header [aria-label*="Select row"],
+        div.ag-pinned-left-header [aria-label*="Select all rows"],
+        div.ag-pinned-left-cols-container [aria-label*="Select all rows"] {
             display: none !important;
         }
         </style>
@@ -361,7 +361,8 @@ with stat_builder_container:
         "Show",
         header_name="Show",
         cellRenderer="agCheckboxCellRenderer",
-        cellEditor="agCheckboxCellEditor",
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": [True, False]},
         width=100,
         suppressMenu=True,
     )
