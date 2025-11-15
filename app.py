@@ -8,7 +8,13 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from pathlib import Path
 from pybaseball import batting_stats
 from datetime import date
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+from st_aggrid import (
+    AgGrid,
+    GridOptionsBuilder,
+    GridUpdateMode,
+    DataReturnMode,
+    JsCode,
+)
 
 st.set_page_config(page_title="Team Stat Leaders App", layout="wide")
 
@@ -42,10 +48,10 @@ if not st.session_state.get(CSS_KEY):
     st.markdown(
         """
         <style>
-        div.ag-pinned-left-cols-container [aria-label*="Select row"],
-        div.ag-pinned-left-header [aria-label*="Select row"],
-        div.ag-pinned-left-header [aria-label*="Select all rows"],
-        div.ag-pinned-left-cols-container [aria-label*="Select all rows"] {
+        /* Keep row selector column hidden without touching data columns */
+        div.ag-header-cell[col-id="ag-RowSelector"],
+        div.ag-pinned-left-cols-container [col-id="ag-RowSelector"],
+        div.ag-center-cols-container [col-id="ag-RowSelector"] {
             display: none !important;
         }
         </style>
@@ -213,6 +219,33 @@ add_select_key = "add_stat_select"
 remove_select_key = "remove_stat_select"
 add_reset_key = "reset_add_select"
 remove_reset_key = "reset_remove_select"
+show_checkbox_renderer = JsCode(
+    """
+    class ShowCheckboxRenderer {
+        init(params) {
+            this.params = params;
+            this.eGui = document.createElement('div');
+            this.eGui.style.display = 'flex';
+            this.eGui.style.justifyContent = 'center';
+            this.eGui.style.alignItems = 'center';
+            this.checkbox = document.createElement('input');
+            this.checkbox.type = 'checkbox';
+            this.checkbox.checked = Boolean(params.value);
+            this.checkbox.addEventListener('change', () => {
+                params.node.setDataValue(params.column.colId, this.checkbox.checked);
+            });
+            this.eGui.appendChild(this.checkbox);
+        }
+        getGui() {
+            return this.eGui;
+        }
+        refresh(params) {
+            this.checkbox.checked = Boolean(params.value);
+            return true;
+        }
+    }
+    """
+)
 
 def add_stat_callback(stat_key: str, select_key: str, reset_key: str, sentinel: str):
     choice = st.session_state.get(select_key)
@@ -337,6 +370,7 @@ with stat_builder_container:
         sortable=False,
         resizable=True,
     )
+    gb.configure_selection(selection_mode="disabled", use_checkbox=False)
     gb.configure_grid_options(
         rowDragManaged=True,
         rowDragMultiRow=True,
@@ -344,7 +378,6 @@ with stat_builder_container:
         animateRows=True,
         suppressMovableColumns=True,
         suppressRowClickSelection=True,
-        rowSelection="single",
         singleClickEdit=True,
         stopEditingWhenCellsLoseFocus=True,
     )
@@ -360,9 +393,8 @@ with stat_builder_container:
     gb.configure_column(
         "Show",
         header_name="Show",
-        cellRenderer="agCheckboxCellRenderer",
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": [True, False]},
+        cellRenderer=show_checkbox_renderer,
+        editable=False,
         width=100,
         suppressMenu=True,
     )
@@ -382,7 +414,7 @@ with stat_builder_container:
         theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
         update_mode=GridUpdateMode.GRID_CHANGED,
-        allow_unsafe_jscode=False,
+        allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key="stat_builder_grid",
         update_on=["rowDragEnd", "cellValueChanged"],
