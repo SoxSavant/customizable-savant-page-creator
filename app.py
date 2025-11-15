@@ -88,13 +88,12 @@ DEFAULT_STATS = [
 ]
 
 STAT_ALLOWLIST = [
-    "Off", "Def", "BsR", "WAR", "Barrel%", "HardHit%", "EV", "MaxEV",
-    "wRC+", "wOBA", "xwOBA", "OPS", "SLG", "OBP", "AVG", "ISO",
-    "BABIP", "R", "RBI", "HR", "XBH", "2B", "3B", "SB", "CS",
-    "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%",
-    "Contact%", "Z-Contact%", "O-Contact%", "Whiff%",
-    "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
-     "OPS+", "xBA", "xSLG",
+    "Off", "Def", "BsR", "WAR", "Barrel%", "HardHit%", "EV", "maxEV"
+    "wRC+", "wOBA", "xwOBA", "xBA", "xSLG", "OPS", "SLG", "OBP", "AVG", "ISO",
+    "BABIP", "R", "RBI", "HR", "XBH", "2B", "3B", "SB", "CS", "BB", "IBB", "SO", 
+    "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
+    "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
+     "OPS+", "FRV",
 ]
 
 @st.cache_data(show_spinner=True)
