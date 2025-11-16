@@ -6,7 +6,8 @@ import matplotlib.image as mpimg
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from pathlib import Path
-from pybaseball import batting_stats, fielding_stats
+from io import BytesIO
+from pybaseball import batting_stats
 from datetime import date
 from st_aggrid import (
     AgGrid,
@@ -16,7 +17,9 @@ from st_aggrid import (
     JsCode,
 )
 
-st.set_page_config(page_title="Team Stat Leaders App", layout="wide")
+plt.rcdefaults()  # ensure default fonts/styles each run
+
+st.set_page_config(page_title="Custom Team Savant Page App", layout="wide")
 
 # Hide Streamlit Cloud toolbar + profile badge on deployed app
 st.markdown(
@@ -32,7 +35,7 @@ st.markdown(
 )
 title_col, meta_col = st.columns([3, 1])
 with title_col:
-    st.title("Customizable Team Stat Leaders App")
+    st.title("Custom Team Savant Page App")
 with meta_col:
     st.markdown(
         """
@@ -84,7 +87,7 @@ TRUTHY_STRINGS = {"true", "1", "yes", "y", "t"}
 
 DEFAULT_STATS = [
     "WAR", "Off", "BsR", "Def", "xwOBA", "xBA", "xSLG", "EV", "Barrel%",
-    "HardHit%", "O-Swing%", "Whiff%", "K%", "BB%", "FRV",
+    "HardHit%", "O-Swing%", "Whiff%", "K%", "BB%",
 ]
 
 STAT_ALLOWLIST = [
@@ -92,81 +95,12 @@ STAT_ALLOWLIST = [
     "wRC+", "wOBA", "xwOBA", "xBA", "xSLG", "OPS", "SLG", "OBP", "AVG", "ISO",
     "BABIP", "R", "RBI", "HR", "XBH", "2B", "3B", "SB", "CS", "BB", "IBB", "SO",
     "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
-    "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA", "FRV",
+    "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
 ]
-PA_EXEMPT_STATS = {"FRV"}
-PCT_EXEMPT_STATS = {"FRV"}
-
-def _copy_column(df: pd.DataFrame, target: str, candidates: list[str]) -> bool:
-    for col in candidates:
-        if col in df.columns:
-            if col != target:
-                df[target] = df[col]
-            return True
-    return False
-
 
 @st.cache_data(show_spinner=True)
 def load_batting(y: int) -> pd.DataFrame:
-    hitters = batting_stats(y, y, qual=0)
-    _copy_column(hitters, "Team", ["Team", "team", "Tm"])
-    _copy_column(hitters, "Name", ["Name", "Player", "player"])
-    hitter_has_player_key = _copy_column(hitters, "_merge_player", ["playerid", "playeridfg", "IDfg"])
-
-    try:
-        fielding = fielding_stats(y, y, qual=0)
-    except Exception:
-        fielding = None
-
-    hitters["FRV"] = np.nan
-
-    if fielding is not None and "FRV" in fielding.columns:
-        _copy_column(fielding, "Team", ["Team", "team", "Tm"])
-        _copy_column(fielding, "Name", ["Name", "Player", "player"])
-        field_has_player_key = _copy_column(fielding, "_merge_player", ["playerid", "playeridfg", "IDfg"])
-
-        def _clean_name(df: pd.DataFrame) -> None:
-            if "Name" in df.columns:
-                df["Name"] = (
-                    df["Name"].astype(str).str.replace(".", "", regex=False).str.strip()
-                )
-
-        _clean_name(hitters)
-        _clean_name(fielding)
-
-        def merge_fill(keys: list[str]) -> None:
-            nonlocal hitters
-            if not all(col in hitters.columns for col in keys):
-                return
-            if not all(col in fielding.columns for col in keys):
-                return
-            subset_cols = list(keys) + ["FRV"]
-            subset = fielding[subset_cols].copy()
-            subset["FRV"] = pd.to_numeric(subset["FRV"], errors="coerce")
-            subset = subset.dropna(subset=["FRV"])
-            if subset.empty:
-                return
-            subset = subset.groupby(keys, as_index=False)["FRV"].mean()
-            subset = subset.rename(columns={"FRV": "FRV_candidate"})
-            hitters = hitters.merge(subset, on=keys, how="left")
-            hitters["FRV"] = hitters["FRV"].combine_first(hitters["FRV_candidate"])
-            hitters = hitters.drop(columns=["FRV_candidate"])
-
-        merge_sequences: list[list[str]] = []
-        if hitter_has_player_key and field_has_player_key:
-            if "Team" in hitters.columns and "Team" in fielding.columns:
-                merge_sequences.append(["_merge_player", "Team"])
-            merge_sequences.append(["_merge_player"])
-        if "Name" in hitters.columns and "Name" in fielding.columns:
-            if "Team" in hitters.columns and "Team" in fielding.columns:
-                merge_sequences.append(["Name", "Team"])
-            merge_sequences.append(["Name"])
-
-        for cols in merge_sequences:
-            merge_fill(cols)
-
-    hitters = hitters.drop(columns=[col for col in ["_merge_player"] if col in hitters.columns])
-    return hitters
+    return batting_stats(y, y, qual=0)
 
 def get_teams_for_year(season: int) -> dict[str, str]:
     """Return team mapping for provided season, handling Athletics rename."""
@@ -256,8 +190,7 @@ if league_for_pct.empty:
     st.stop()
 
 # Team leaders for selected PA
-team_all = df[df["Team"] == team_abbr].copy()
-team_df = team_all[team_all["PA"] >= min_pa].copy()
+team_df = df[(df["Team"] == team_abbr) & (df["PA"] >= min_pa)].copy()
 if team_df.empty:
     st.warning(f"No players on {team_abbr} with ≥ {min_pa} PA.")
     st.stop()
@@ -496,6 +429,9 @@ if grid_response and grid_response.data is not None:
         grid_df = pd.DataFrame(grid_response.data)
     if "Drag" in grid_df.columns:
         grid_df = grid_df.drop(columns=["Drag"])
+    if "Stat" in grid_df.columns:
+        # Drop AG Grid placeholder rows that have no stat selected
+        grid_df = grid_df[grid_df["Stat"].astype(str).str.strip().ne("")]
     grid_records = grid_df.to_dict("records")
 
 manual_override = st.session_state.pop(manual_stat_update_key, False)
@@ -552,8 +488,7 @@ for stat in stats_order:
         continue
 
     # TEAM values
-    source_team_df = team_all if stat in PA_EXEMPT_STATS else team_df
-    team_vals = source_team_df[[stat, "Name"]].dropna(subset=[stat])
+    team_vals = team_df[[stat, "Name"]].dropna(subset=[stat])
     if team_vals.empty:
         continue  # no one on the team has a real value for this stat
 
@@ -564,8 +499,7 @@ for stat in stats_order:
     leader_val = float(team_leader_row[stat])
 
     # LEAGUE percentile distribution (340+ PA)
-    league_source = df if stat in PCT_EXEMPT_STATS else league_for_pct
-    league_vals = league_source[stat].dropna()
+    league_vals = league_for_pct[stat].dropna()
     if league_vals.empty:
         continue  # league does not have values for this stat
 
@@ -605,16 +539,16 @@ with right_col:
 
     # Increased height based on number of rows
     fig_height = 1.8 + len(lead_df) * 0.45
-    fig, ax = plt.subplots(figsize=(8, fig_height))
+    fig, ax = plt.subplots(figsize=(7.5, fig_height))
 
     # Adjust white card space
-    ax.set_position([0.05, 0.11, .9, 0.70])
+    ax.set_position([0.08, 0.11, .8, .7])
 
     # Title
     fig.text(
-        0.08, .88,
+        0.5, .88,
         f"{team_full_name} {year} Stat Leaders",
-        ha="left", va="center",
+        ha="center", va="center",
         fontsize=23, fontweight="bold"
     )
 
@@ -699,11 +633,22 @@ with right_col:
         ax.text(LABEL_X, i, row["Stat"],
                 ha="right", va="center", fontsize=13,)
 
-    ax.set_xlim(-20, VALUE_X + 25)
+    ax.set_xlim(-15, VALUE_X)
     ax.set_ylim(-0.5, len(lead_df) - 0.5)
     ax.invert_yaxis()
     ax.set_xticks([])
     ax.set_yticks([])
     ax.axis("off")
 
+    pdf_buffer = BytesIO()
+    fig.savefig(pdf_buffer, format="pdf",)
+    pdf_buffer.seek(0)
+
     st.pyplot(fig, use_container_width=False, clear_figure=True)
+    download_name = f"{team_abbr}_{year}_stat_leaders.pdf"
+    st.download_button(
+        "Download card as PDF",
+        data=pdf_buffer,
+        file_name=download_name,
+        mime="application/pdf",
+    )
