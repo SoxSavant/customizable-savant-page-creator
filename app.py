@@ -85,15 +85,60 @@ TEAMS = {
 
 TRUTHY_STRINGS = {"true", "1", "yes", "y", "t"}
 
-DEFAULT_STATS = [
-    "WAR", "Off", "BsR", "Def", "xwOBA", "xBA", "xSLG", "EV", "Barrel%",
-    "HardHit%", "O-Swing%", "Whiff%", "K%", "BB%",
-]
+STAT_PRESETS = {
+    "Statcast": [
+        "WAR",
+        "Off",
+        "BsR",
+        "Def",
+        "xwOBA",
+        "xBA",
+        "xSLG",
+        "EV",
+        "Barrel%",
+        "HardHit%",
+        "O-Swing%",
+        "Whiff%",
+        "K%",
+        "BB%",
+    ],
+    "Standard": [
+        "AVG",
+        "OBP",
+        "SLG",
+        "OPS",
+        "H",
+        "2B",
+        "3B",
+        "HR",
+        "XBH",
+        "RBI",
+        "SB",
+        "R",
+        "K%",
+        "BB%",
+    ],
+    "Miscellaneous": [
+        "K-BB%",
+        "O-Swing%",
+        "Z-Swing%",
+        "Swing%",
+        "Contact%",
+        "WPA",
+        "Clutch",
+        "Pull%",
+        "Cent%",
+        "Oppo%",
+        "GB%",
+        "FB%",
+        "LD%",
+    ],
+}
 
 STAT_ALLOWLIST = [
     "Off", "Def", "BsR", "WAR", "Barrel%", "HardHit%", "EV", "MaxEV",
     "wRC+", "wOBA", "xwOBA", "xBA", "xSLG", "OPS", "SLG", "OBP", "AVG", "ISO",
-    "BABIP", "R", "RBI", "HR", "XBH", "2B", "3B", "SB", "CS", "BB", "IBB", "SO",
+    "BABIP", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
     "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
     "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
 ]
@@ -128,7 +173,7 @@ def get_team_nickname(full_name: str) -> str:
 # --------------------- Controls ---------------------
 left_col, right_col = st.columns([1.2, 1.5])
 
-with left_col.form("controls"):
+with left_col:
     year = st.slider("Season", 1900, date.today().year, date.today().year)
     teams_for_year = get_teams_for_year(year)
     team_options = list(teams_for_year.keys())
@@ -146,8 +191,7 @@ with left_col.form("controls"):
         index=default_index,
         key=team_select_key,
     )
-    min_pa = st.number_input("Min Plate Appearances (for *team* leader)", 0, 800, 340)
-    submitted = st.form_submit_button("Update")
+    min_pa = st.number_input("Minimum PA", 0, 800, 340)
 
 stat_builder_container = left_col.container()
 
@@ -183,7 +227,7 @@ else:
     df["Whiff%"] = np.nan
 
 # League for percentile distribution (Savant uses 340+ PA)
-PCT_PA = 340
+PCT_PA = 126 if year == 2020 else 340
 league_for_pct = df[df["PA"] >= PCT_PA].copy()
 if league_for_pct.empty:
     st.error(f"No league hitters ≥ {PCT_PA} PA in {year}.")
@@ -195,7 +239,7 @@ if team_df.empty:
     st.warning(f"No players on {team_abbr} with ≥ {min_pa} PA.")
     st.stop()
 
-# --------------------- Stat builder ---------------------
+# --------------------- Stat builder setup ---------------------
 numeric_stats = [
     col for col in df.columns
     if pd.api.types.is_numeric_dtype(df[col])
@@ -212,14 +256,17 @@ if not stat_options:
     st.error("No numeric stats available to display.")
     st.stop()
 
-default_stat_config = [{"Stat": stat, "Show": True} for stat in DEFAULT_STATS if stat in stat_options]
-if not default_stat_config:
-    default_stat_config = [{"Stat": stat_options[0], "Show": True}]
+default_preset_name = "Statcast"
+stat_preset_key = "stat_preset_select"
+preset_options = list(STAT_PRESETS.keys())
+stat_state_key = "stat_config"
 manual_stat_update_key = "stat_config_manual_update"
 add_select_key = "add_stat_select"
 remove_select_key = "remove_stat_select"
 add_reset_key = "reset_add_select"
 remove_reset_key = "reset_remove_select"
+
+# --- AG Grid Checkbox Renderer JS ---
 show_checkbox_renderer = JsCode(
     """
     class ShowCheckboxRenderer {
@@ -229,6 +276,8 @@ show_checkbox_renderer = JsCode(
             this.eGui.style.display = 'flex';
             this.eGui.style.justifyContent = 'center';
             this.eGui.style.alignItems = 'center';
+            this.eGui.style.height = '100%';
+            this.eGui.style.width = '100%';
             this.checkbox = document.createElement('input');
             this.checkbox.type = 'checkbox';
             this.checkbox.checked = Boolean(params.value);
@@ -247,13 +296,22 @@ show_checkbox_renderer = JsCode(
     }
     """
 )
+# --- End AG Grid Checkbox Renderer JS ---
 
+# --- Callbacks ---
 def add_stat_callback(stat_key: str, select_key: str, reset_key: str, sentinel: str):
     choice = st.session_state.get(select_key)
     if not choice or choice == sentinel:
         return
-    config = st.session_state.get(stat_key, default_stat_config)
-    config = normalize_stat_rows(config, default_stat_config)
+    # Recalculate base config to pass to normalize_stat_rows
+    current_preset_for_base = st.session_state.get(stat_preset_key, default_preset_name)
+    preset_base_candidates = [stat for stat in STAT_PRESETS[current_preset_for_base] if stat in stat_options]
+    if not preset_base_candidates and stat_options:
+        preset_base_candidates = [stat_options[0]]
+    preset_base_config = [{"Stat": stat, "Show": True} for stat in preset_base_candidates]
+
+    config = st.session_state.get(stat_key, preset_base_config)
+    config = normalize_stat_rows(config, preset_base_config)
     if not any(row["Stat"] == choice for row in config):
         config.append({"Stat": choice, "Show": True})
     st.session_state[stat_key] = config
@@ -264,12 +322,32 @@ def remove_stat_callback(stat_key: str, select_key: str, reset_key: str, sentine
     choice = st.session_state.get(select_key)
     if not choice or choice == sentinel:
         return
-    config = st.session_state.get(stat_key, default_stat_config)
-    config = normalize_stat_rows(config, default_stat_config)
+    # Recalculate base config to pass to normalize_stat_rows
+    current_preset_for_base = st.session_state.get(stat_preset_key, default_preset_name)
+    preset_base_candidates = [stat for stat in STAT_PRESETS[current_preset_for_base] if stat in stat_options]
+    if not preset_base_candidates and stat_options:
+        preset_base_candidates = [stat_options[0]]
+    preset_base_config = [{"Stat": stat, "Show": True} for stat in preset_base_candidates]
+
+    config = st.session_state.get(stat_key, preset_base_config)
+    config = normalize_stat_rows(config, preset_base_config)
     new_config = [row for row in config if row.get("Stat") != choice]
-    st.session_state[stat_key] = new_config or [row.copy() for row in default_stat_config]
+    st.session_state[stat_key] = new_config or [row.copy() for row in preset_base_config]
     st.session_state[manual_stat_update_key] = True
     st.session_state[reset_key] = True
+
+def stat_preset_callback(preset_key: str, stat_key: str, available_stats: list[str]):
+    preset_name = st.session_state.get(preset_key, default_preset_name)
+    preset_stats = STAT_PRESETS.get(preset_name, [])
+    filtered_stats = [stat for stat in preset_stats if stat in available_stats]
+    if not filtered_stats and available_stats:
+        filtered_stats = [available_stats[0]]
+    if not filtered_stats:
+        return
+    st.session_state[stat_key] = [{"Stat": stat, "Show": True} for stat in filtered_stats]
+    st.session_state[manual_stat_update_key] = True
+    st.session_state[add_reset_key] = True
+    st.session_state[remove_reset_key] = True
 
 def normalize_stat_rows(rows, fallback):
     """Clean incoming rows into a valid stat config list."""
@@ -297,14 +375,56 @@ def normalize_stat_rows(rows, fallback):
     if not cleaned:
         cleaned = [row.copy() for row in fallback]
     return cleaned
+# --- End Callbacks ---
 
-stat_state_key = "stat_config"
-current_stat_config = st.session_state.get(stat_state_key, default_stat_config)
-current_stat_config = normalize_stat_rows(current_stat_config, default_stat_config)
+# ====================================================================================
+# FIX: Ensure stat_config persists across Team/PA changes by initializing it only once.
+# ====================================================================================
+
+# 1. Initialize State ONLY ONCE if not present (This is what prevents the reset)
+if stat_state_key not in st.session_state:
+    st.session_state[stat_preset_key] = default_preset_name
+    
+    # Calculate initial base config for the default preset
+    current_preset_for_base = st.session_state[stat_preset_key]
+    preset_base_candidates = [stat for stat in STAT_PRESETS[current_preset_for_base] if stat in stat_options]
+    if not preset_base_candidates and stat_options:
+        preset_base_candidates = [stat_options[0]]
+    preset_base_config = [{"Stat": stat, "Show": True} for stat in preset_base_candidates]
+    
+    # Set the initial stat config
+    st.session_state[stat_state_key] = preset_base_config
+
+# 2. Update config variables for the current run based on session state
+current_preset_for_base = st.session_state.get(stat_preset_key, default_preset_name)
+preset_base_candidates = [stat for stat in STAT_PRESETS[current_preset_for_base] if stat in stat_options]
+if not preset_base_candidates and stat_options:
+    preset_base_candidates = [stat_options[0]]
+preset_base_config = [{"Stat": stat, "Show": True} for stat in preset_base_candidates]
+
+current_stat_config = st.session_state.get(stat_state_key, preset_base_config)
+current_stat_config = normalize_stat_rows(current_stat_config, preset_base_config)
+
+# ====================================================================================
+# END FIX
+# ====================================================================================
 
 with stat_builder_container:
+    # 3. New Preset Select Box (Simplified)
+    # Using key and on_change prevents the config from being reset on Min PA/Team change.
+    prior_preset = st.session_state.get(stat_preset_key, default_preset_name)
+    preset_index = preset_options.index(prior_preset) if prior_preset in preset_options else 0
+    st.selectbox(
+        "Stat Preset",
+        preset_options,
+        index=preset_index,
+        key=stat_preset_key, # Use the session state key directly
+        on_change=stat_preset_callback,
+        args=(stat_preset_key, stat_state_key, stat_options)
+    )
+
     st.markdown("### Customize stats")
-    st.caption("Drag the handle to reorder. Use the controls below to add or remove stats.")
+    st.caption("Drag to reorder. Use the drop downs to add or remove stats.")
 
     stats_in_config = [row.get("Stat") for row in current_stat_config if row.get("Stat")]
     available_pool = allowed_add_stats if allowed_add_stats else stat_options
@@ -329,8 +449,9 @@ with stat_builder_container:
 
     with add_col:
         st.selectbox(
-            "Add stat",
+            "",
             add_options,
+            label_visibility= "hidden",
             key=add_select_key,
             on_change=add_stat_callback,
             args=(stat_state_key, add_select_key, add_reset_key, sentinel_add),
@@ -338,22 +459,23 @@ with stat_builder_container:
 
     with remove_col:
         st.selectbox(
-            "Remove stat",
+            "",
             remove_options,
+            label_visibility="hidden",
             key=remove_select_key,
             on_change=remove_stat_callback,
             args=(stat_state_key, remove_select_key, remove_reset_key, sentinel_remove),
         )
 
-    current_stat_config = normalize_stat_rows(st.session_state.get(stat_state_key, default_stat_config), default_stat_config)
+    current_stat_config = normalize_stat_rows(st.session_state.get(stat_state_key, preset_base_config), preset_base_config)
 
     stat_config_df = pd.DataFrame(current_stat_config)
     if stat_config_df.empty:
-        stat_config_df = pd.DataFrame(default_stat_config)
+        stat_config_df = pd.DataFrame(preset_base_config)
     if "Show" not in stat_config_df.columns:
         stat_config_df["Show"] = True
     if "Stat" not in stat_config_df.columns:
-        stat_config_df["Stat"] = default_stat_config[0]["Stat"]
+        stat_config_df["Stat"] = preset_base_config[0]["Stat"]
     stat_config_df = stat_config_df[["Show", "Stat"]].copy()
     stat_config_df["Show"] = stat_config_df["Show"].apply(
         lambda val: True
@@ -414,11 +536,13 @@ with stat_builder_container:
         height=grid_height,
         theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        update_mode=GridUpdateMode.GRID_CHANGED,
+        # Change update_mode to suppress automatic grid update on every rerun
+        update_mode=GridUpdateMode.VALUE_CHANGED, # Or even GridUpdateMode.MODEL_CHANGED
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key="stat_builder_grid",
-        update_on=["rowDragEnd", "cellValueChanged"],
+        # IMPORTANT: Keep update_on to force a rerun ONLY on these user interactions
+        update_on=["rowDragEnd", "cellValueChanged"], 
     )
 
 grid_records = None
@@ -434,12 +558,29 @@ if grid_response and grid_response.data is not None:
         grid_df = grid_df[grid_df["Stat"].astype(str).str.strip().ne("")]
     grid_records = grid_df.to_dict("records")
 
+# ... (code up to line 664, after grid_records is defined)
+
 manual_override = st.session_state.pop(manual_stat_update_key, False)
+
+# Convert current_stat_config to records for comparison
+current_config_records = [{k: v for k, v in row.items() if k in ["Stat", "Show"]} for row in current_stat_config]
+
+# Determine if the grid data is identical to the current state data
+is_config_identical = (
+    grid_records is not None and 
+    len(grid_records) == len(current_config_records) and 
+    all(a["Stat"] == b["Stat"] and a["Show"] == b["Show"] for a, b in zip(grid_records, current_config_records))
+)
+
 if manual_override:
+    # 1. If add/remove was used, the state is already correct from the callback
     cleaned_config = current_stat_config.copy()
-elif grid_records:
-    cleaned_config = normalize_stat_rows(grid_records, default_stat_config)
+elif grid_records and not is_config_identical:
+    # 2. If grid data exists AND it is DIFFERENT from the current state, 
+    #    assume the user edited/dragged and update the state.
+    cleaned_config = normalize_stat_rows(grid_records, preset_base_config)
 else:
+    # 3. Otherwise (Min PA/Team change), stick with the existing state order
     cleaned_config = current_stat_config.copy()
 
 st.session_state[stat_state_key] = cleaned_config
@@ -454,11 +595,22 @@ def format_stat(stat: str, val) -> str:
     if pd.isna(val):
         return ""
 
-    if stat.upper() in {"AVG", "OBP", "SLG", "OPS", "WOBA", "XWOBA", "XBA", "XSLG"}:
+    upper_stat = stat.upper()
+
+    if upper_stat in {"WAR", "FWAR", "EV", "AVG EXIT VELO"}:
+        v = float(val)
+        if abs(v - round(v)) < 1e-9:
+            return f"{int(round(v))}.0"
+        return f"{v:.1f}"
+
+    if upper_stat in {"WPA", "CLUTCH"}:
+        return f"{float(val):.2f}"
+
+    if upper_stat in {"AVG", "OBP", "SLG", "OPS", "WOBA", "XWOBA", "XBA", "XSLG", "BABIP", "ISO"}:
         return f"{float(val):.3f}".lstrip("0")
 
     if (
-        "Barrel" in stat or "Hard" in stat or "K%" in stat or "BB" in stat
+        "Barrel" in stat or "Hard" in stat or "K%" in stat
         or "Swing" in stat or "Whiff" in stat or "%" in stat
     ):
         v = float(val)
@@ -475,11 +627,9 @@ leaders = []
 label_map = {
     "HardHit%": "Hard Hit%",
     "WAR": "fWAR",
-    "O-Swing%": "Chase%",
-    "Whiff%": "Whiff%",
     "EV": "Avg Exit Velo",
 }
-lower_better = {"K%", "O-Swing%", "Whiff%"}
+lower_better = {"K%", "O-Swing%", "Whiff%", "GB%"}
 
 for stat in stats_order:
 
@@ -534,29 +684,35 @@ with right_col:
 
     cmap = LinearSegmentedColormap.from_list(
         "savant",
-        [(0, "#4C90D6"), (0.5, "#E5E5E5"), (1, "#D64541")]
+        [
+            (0, "#335AA1"),   # low end (blue)
+            (0.5, "#E8E8E8"), # neutral
+            (1, "#D92229"),   # high end (bright red)
+        ],
     )
 
     # Increased height based on number of rows
-    fig_height = 1.8 + len(lead_df) * 0.45
+    fig_height = 1.7 + len(lead_df) * 0.40
     fig, ax = plt.subplots(figsize=(7.5, fig_height))
 
-    # Adjust white card space
-    ax.set_position([0.08, 0.11, .8, .7])
+    # Adjust white card space with more breathing room between subtitle and bars
+    top_pad = 0.12 if len(lead_df) > 6 else 0.14 if len(lead_df) > 4 else 0.4
+    ax_height = 0.82 - top_pad
+    ax.set_position([0.08, top_pad, 0.8, ax_height])
 
     # Title
     fig.text(
-        0.5, .88,
-        f"{team_full_name} {year} Stat Leaders",
+        0.5, 0.885,
+        f"{year} {team_full_name}",
         ha="center", va="center",
-        fontsize=23, fontweight="bold"
+        fontsize=22, fontweight="bold"
     )
 
     fig.text(
-        0.5, 0.83,
+        0.5, 0.84,
         f"(min {min_pa} PA)",
         ha="center", va="center",
-        fontsize=15, color="#555"
+        fontsize=13, color="#555"
     )
 
     fig.text(
@@ -585,8 +741,8 @@ with right_col:
 
     y = np.arange(len(lead_df))
 
-    TRACK_H = 0.68
-    BAR_H = 0.68
+    TRACK_H = 0.82
+    BAR_H = 0.82
     LEFT_OFFSET = 3
     VALUE_X = 110
     LABEL_X = 0
@@ -604,7 +760,7 @@ with right_col:
         name = row["Leader"]
         bubble_x = LEFT_OFFSET + pct
         name_x = LEFT_OFFSET + pct / 2
-        needs_shift = pct < len(str(name)) * 3.0
+        needs_shift = pct < len(str(name)) * 3.2
         if needs_shift:
             name_x = bubble_x + (VALUE_X -  bubble_x) * 0.2
             name_ha = "left"
@@ -647,7 +803,7 @@ with right_col:
     st.pyplot(fig, use_container_width=False, clear_figure=True)
     download_name = f"{team_abbr}_{year}_stat_leaders.pdf"
     st.download_button(
-        "Download card as PDF",
+        "Download as PDF",
         data=pdf_buffer,
         file_name=download_name,
         mime="application/pdf",
