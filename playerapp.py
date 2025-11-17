@@ -424,7 +424,7 @@ with stat_builder_container:
 
     with add_col:
         st.selectbox(
-            "",
+            "Add stat",
             add_options,
             label_visibility="hidden",
             key=add_select_key,
@@ -434,7 +434,7 @@ with stat_builder_container:
 
     with remove_col:
         st.selectbox(
-            "",
+            "Remove stat",
             remove_options,
             label_visibility="hidden",
             key=remove_select_key,
