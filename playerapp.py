@@ -44,7 +44,7 @@ with meta_col:
         """
         <div style="text-align: right; font-size: 1rem; padding-top: 0.6rem;">
             Built by <a href="https://twitter.com/Sox_Savant" target="_blank">@Sox_Savant</a>
-            <span style="color: #aaa;">(v 1.0)</span>
+            <span style="color: #aaa;">(v 1.1)</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -666,7 +666,7 @@ with right_col:
     TRACK_H = 0.82
     BAR_H = 0.82
     LEFT_OFFSET = 3
-    BAR_LENGTH = 45  # shorten bars left-to-right
+    BAR_LENGTH = 45 
     VALUE_X = LEFT_OFFSET + BAR_LENGTH + 12
     BUBBLE_SIZE = 700
 
