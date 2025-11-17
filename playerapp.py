@@ -503,22 +503,26 @@ with stat_builder_container:
         header_name="Stat",
         editable=True,
         cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": stat_options},
+        cellEditorParams={"values": allowed_add_stats or stat_options},
     )
 
     grid_options = gb.build()
 
+    grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_response = AgGrid(
         stat_config_df,
         gridOptions=grid_options,
-        height=360,
+        height=grid_height,
         width="100%",
+        theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
+        reload_data=True,
         fit_columns_on_grid_load=True,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key="stat_grid",
+        update_on=["rowDragEnd", "cellValueChanged"],
     )
 
 grid_df = None

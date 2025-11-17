@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from datetime import date
+from io import BytesIO
 from pybaseball import batting_stats, playerid_lookup
 from st_aggrid import (
     AgGrid,
@@ -45,7 +47,7 @@ st.markdown(
             display: flex;
             align-items: center;
             justify-content: space-around;
-            gap: 13rem;
+            gap: 14em;
             margin-bottom: 1.2rem;
         }
         .compare-card .headshot-col {
@@ -91,8 +93,8 @@ st.markdown(
             padding: 10px 0 6px 0;
             border-top: 1px solid #d0d0d0;
             border-bottom: 1px solid #d0d0d0;
-            border-left: none;
-            border-right: none;
+            border-left: 1px solid #d0d0d0;
+            border-right: 1px solid #d0d0d0;
         }
         .compare-table .stat-col {
             font-weight: 700;
@@ -620,22 +622,26 @@ with stat_builder_container:
         header_name="Stat",
         editable=True,
         cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": stat_options},
+        cellEditorParams={"values": allowed_add_stats or stat_options},
     )
 
     grid_options = gb.build()
 
+    grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_response = AgGrid(
         stat_config_df,
         gridOptions=grid_options,
-        height=360,
+        height=grid_height,
         width="100%",
+        theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
+        reload_data=True,
         fit_columns_on_grid_load=True,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key="comp_stat_grid",
+        update_on=["rowDragEnd", "cellValueChanged"],
     )
 
 grid_df = None
@@ -769,10 +775,8 @@ with right_col:
             "  </div>",
             "  <table class=\"compare-table\">",
             "    <thead>",
-            "      <tr>",
-            "        <th></th>",
-            "        <th class=\"stat-col overall-header\">Overall Stats</th>",
-            "        <th></th>",
+            "      <tr class=\"overall-row\">",
+            "        <th colspan=\"3\">Overall Stats</th>",
             "      </tr>",
             "    </thead>",
             "    <tbody>",
@@ -795,3 +799,58 @@ with right_col:
             "</div>",
         ])
         st.markdown("\n".join(rows), unsafe_allow_html=True)
+
+        # -------- Download as PDF --------
+        pdf_buffer = BytesIO()
+        col_labels = [player_a, "Stat", player_b]
+        cell_text = []
+        cell_colors = []
+        for _, row in table_df.iterrows():
+            stat_label = row["Stat"]
+            best = winner_map.get(stat_label)
+            a_val = row[player_a]
+            b_val = row[player_b]
+            cell_text.append([a_val, stat_label, b_val])
+            a_color = "#E5F1E4" if best == player_a else "#ffffff"
+            b_color = "#E5F1E4" if best == player_b else "#ffffff"
+            cell_colors.append([a_color, "#fafafa", b_color])
+
+        fig, ax = plt.subplots(figsize=(8.5, 0.55 * (len(table_df) + 2)))
+        ax.axis("off")
+        table = ax.table(
+            cellText=cell_text,
+            cellColours=cell_colors,
+            colLabels=col_labels,
+            cellLoc="center",
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1, 1.3)
+
+        # Bold the header row
+        for col_idx in range(len(col_labels)):
+            cell = table[0, col_idx]
+            cell.set_facecolor("#f1f1f1")
+            cell.get_text().set_color("#7b0d0d")
+            cell.get_text().set_fontweight("bold")
+
+        # Bold stat names and winners
+        for i in range(1, len(cell_text) + 1):
+            stat_cell = table[i, 1]
+            stat_cell.get_text().set_fontweight("bold")
+            if cell_colors[i - 1][0] != "#ffffff":
+                table[i, 0].get_text().set_fontweight("bold")
+            if cell_colors[i - 1][2] != "#ffffff":
+                table[i, 2].get_text().set_fontweight("bold")
+
+        plt.tight_layout()
+        fig.savefig(pdf_buffer, format="pdf", bbox_inches="tight")
+        pdf_buffer.seek(0)
+
+        st.download_button(
+            "Download PDF",
+            data=pdf_buffer,
+            file_name=f"{player_a.replace(' ', '_')}_{player_b.replace(' ', '_')}_{year}_comparison.pdf",
+            mime="application/pdf",
+        )
