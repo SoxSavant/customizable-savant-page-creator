@@ -44,7 +44,7 @@ with meta_col:
         """
         <div style="text-align: right; font-size: 1rem; padding-top: 0.6rem;">
             Built by <a href="https://twitter.com/Sox_Savant" target="_blank">@Sox_Savant</a>
-            <span style="color: #aaa;">(v 1.1)</span>
+            <span style="color: #aaa;">(v 1.0)</span>
         </div>
         """,
         unsafe_allow_html=True,
