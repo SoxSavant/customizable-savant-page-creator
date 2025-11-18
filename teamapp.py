@@ -538,6 +538,7 @@ with stat_builder_container:
         cellEditorParams={"values": allowed_add_stats or stat_options},
         wrapText=True,
         autoHeight=True,
+        flex=1,
     )
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_response = AgGrid(
@@ -546,7 +547,7 @@ with stat_builder_container:
         height=grid_height,
         theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        reload_data=True,
+        reload_data=False,
         fit_columns_on_grid_load=True,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         allow_unsafe_jscode=True,

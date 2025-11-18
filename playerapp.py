@@ -505,6 +505,7 @@ with stat_builder_container:
         editable=True,
         cellEditor="agSelectCellEditor",
         cellEditorParams={"values": allowed_add_stats or stat_options},
+        flex=1,
     )
 
     grid_options = gb.build()
@@ -517,7 +518,7 @@ with stat_builder_container:
         width="100%",
         theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        reload_data=True,
+        reload_data=False,
         fit_columns_on_grid_load=True,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         allow_unsafe_jscode=True,
