@@ -968,7 +968,7 @@ with right_col:
             "  <div class=\"headshot-row\">",
             "    <div class=\"headshot-col\">",
             f"      <div class=\"player-meta\">{esc(str(year_a))} | {esc(str(player_a_team))}</div>",
-            f"      {f'<img src=\"{esc(headshot_a)}\" width=\"200\" />' if headshot_a else ''}",
+            f"      {'<img src=\"{}\" width=\"200\" />'.format(esc(headshot_a)) if headshot_a else ''}",
             f"      <div class=\"player-name\">{esc(player_a)}</div>",
             "    </div>",
             "    <div class=\"headshot-col\">",
