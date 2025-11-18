@@ -107,7 +107,8 @@ STAT_PRESETS = {
         "BB%",
     ],
     "Standard": [
-        "WAR"
+        "WAR",
+        "PA",
         "AVG",
         "OBP",
         "SLG",
@@ -143,12 +144,12 @@ STAT_PRESETS = {
 STAT_ALLOWLIST = [
     "Off", "Def", "BsR", "WAR", "Barrel%", "HardHit%", "EV", "MaxEV",
     "wRC+", "wOBA", "xwOBA", "xBA", "xSLG", "OPS", "SLG", "OBP", "AVG", "ISO",
-    "BABIP", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
+    "BABIP", "PA", "AB", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
     "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
     "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
 ]
 
-@st.cache_data(show_spinner=True)
+@st.cache_data(show_spinner=True, ttl=900)
 def load_batting(y: int) -> pd.DataFrame:
     return batting_stats(y, y, qual=0)
 

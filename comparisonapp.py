@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import html
+import unicodedata
 from datetime import date
 from io import BytesIO
 from pybaseball import batting_stats, playerid_lookup
@@ -57,8 +58,10 @@ st.markdown(
             padding-top: .1rem;
         }
         .compare-card .headshot-col img {
-            border: 1px solid #dcdcdc;
+            border: 1px solid #d0d0d0;
+            background: #f2f2f2;
             border-radius: 4px;
+            padding: 4px;
             width: 230px;
         }
         .compare-card .player-name {
@@ -74,12 +77,13 @@ st.markdown(
         .compare-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 13px;
+            font-size: 14px;
             table-layout: fixed;
+            line-height: 1.5;
         }
         .compare-table th, .compare-table td {
             border: 1px solid #d0d0d0;
-            padding: 5px 7px;
+            padding: 3px 6px;
             text-align: center;
             background: #ffffff;
             color: #111111;
@@ -89,14 +93,15 @@ st.markdown(
             background: #f1f1f1;
             font-weight: 800;
             color: #7b0d0d;
-            font-size: 14px;
+            font-size: 15px;
+            line-height: 1.2;
         }
         .compare-table .overall-row th {
             background: #f1f1f1;
             color: #7b0d0d;
             font-weight: 800;
-            font-size: 14px;
-            padding: 6px 0 4px 0;
+            font-size: 15px;
+            padding: 5px 0 3px 0;
             border-top: 1px solid #d0d0d0;
             border-bottom: 1px solid #d0d0d0;
             border-left: 1px solid #d0d0d0;
@@ -152,6 +157,7 @@ STAT_PRESETS = {
     ],
     "Standard": [
         "WAR",
+        "PA",
         "AVG",
         "OBP",
         "SLG",
@@ -187,7 +193,7 @@ STAT_PRESETS = {
 STAT_ALLOWLIST = [
     "Off", "Def", "BsR", "WAR", "Barrel%", "HardHit%", "EV", "MaxEV",
     "wRC+", "wOBA", "xwOBA", "xBA", "xSLG", "OPS", "SLG", "OBP", "AVG", "ISO",
-    "BABIP", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
+    "BABIP", "PA", "AB", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
     "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
     "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
 ]
@@ -195,7 +201,7 @@ STAT_ALLOWLIST = [
 HEADSHOT_BASE = "https://img.mlbstatic.com/mlb-photos/image/upload/w_240,q_auto:best,f_auto/people/{mlbam}/headshot/silo/current"
 
 
-@st.cache_data(show_spinner=True)
+@st.cache_data(show_spinner=True, ttl=900)
 def load_batting(y: int) -> pd.DataFrame:
     return batting_stats(y, y, qual=0)
 
@@ -203,22 +209,51 @@ def load_batting(y: int) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def lookup_mlbam_id(full_name: str):
     """Best-effort MLBAM lookup using pybaseball's playerid_lookup."""
-    if not full_name or " " not in full_name:
+    if not full_name or not full_name.strip():
         return None
-    parts = full_name.split(" ")
-    first = parts[0]
-    last = " ".join(parts[1:])
-    try:
-        lookup_df = playerid_lookup(last, first)
-    except Exception:
+    suffixes = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "v"}
+
+    def normalize_token(tok: str) -> str:
+        if not tok:
+            return ""
+        tok = tok.replace(".", "").strip()
+        try:
+            return unicodedata.normalize("NFKD", tok).encode("ascii", "ignore").decode()
+        except Exception:
+            return tok
+
+    def strip_suffix(tokens: list[str]) -> list[str]:
+        toks = tokens.copy()
+        while toks and toks[-1].lower() in suffixes:
+            toks.pop()
+        return toks
+
+    parts = full_name.split()
+    base_tokens = strip_suffix(parts)
+    if len(base_tokens) < 2:
         return None
-    if lookup_df is None or lookup_df.empty:
-        return None
-    mlbam = lookup_df.iloc[0].get("key_mlbam")
-    try:
-        return int(mlbam) if pd.notna(mlbam) else None
-    except Exception:
-        return None
+
+    first_raw = base_tokens[0]
+    last_raw = " ".join(base_tokens[1:])
+    variants = [
+        (last_raw, first_raw),
+        (normalize_token(last_raw), normalize_token(first_raw)),
+        (normalize_token(last_raw).lower(), normalize_token(first_raw).lower()),
+    ]
+
+    for last, first in variants:
+        try:
+            lookup_df = playerid_lookup(last, first)
+        except Exception:
+            continue
+        if lookup_df is None or lookup_df.empty:
+            continue
+        mlbam = lookup_df.iloc[0].get("key_mlbam")
+        try:
+            return int(mlbam) if pd.notna(mlbam) else None
+        except Exception:
+            continue
+    return None
 
 
 def get_headshot_url(name: str, df: pd.DataFrame) -> str | None:
@@ -281,9 +316,10 @@ with left_col:
 
 # --------------------- Controls ---------------------
 min_pa_key = "comp_min_pa_input"
-min_pa_default = 200
+min_pa_default = 500
+current_year = date.today().year
+years_desc = list(range(current_year, 1899, -1))
 with controls_container:
-    year = st.slider("Season", 1900, date.today().year, date.today().year)
     min_pa = st.number_input(
         "Minimum PA (for player list)",
         0,
@@ -291,75 +327,101 @@ with controls_container:
         st.session_state.get(min_pa_key, min_pa_default),
         key=min_pa_key,
     )
+    year_col = st.columns(2)
+    with year_col[0]:
+        year_a = st.selectbox(
+            "Season (Player A)",
+            years_desc,
+            index=0,
+            key="comp_year_a",
+        )
+    with year_col[1]:
+        year_b = st.selectbox(
+            "Season (Player B)",
+            years_desc,
+            index=0,
+            key="comp_year_b",
+        )
 
-# --------------------- Data ---------------------
-df = load_batting(year).copy()
 
-if df is None or df.empty:
-    st.error("No data returned from pybaseball.")
+def prep_df(season: int) -> pd.DataFrame:
+    frame = load_batting(season).copy()
+    if frame is None or frame.empty:
+        return frame
+    frame["PA"] = pd.to_numeric(frame["PA"], errors="coerce")
+    frame["Team"] = frame["Team"].astype(str).str.upper()
+    frame["Name"] = frame["Name"].astype(str).str.replace(".", "", regex=False).str.strip()
+    if "Contact%" in frame.columns:
+        contact = pd.to_numeric(frame["Contact%"], errors="coerce")
+        needs_percent_scale = contact.dropna().abs().le(1).mean() > 0.9 if contact.notna().any() else False
+        if needs_percent_scale:
+            contact = contact * 100
+        frame["Contact%"] = contact
+        frame["Whiff%"] = 100 - contact
+    else:
+        frame["Whiff%"] = np.nan
+    return frame
+
+
+df_a = prep_df(year_a)
+df_b = prep_df(year_b)
+
+if df_a is None or df_a.empty or df_b is None or df_b.empty:
+    st.error("No data returned from pybaseball for one of the seasons.")
     st.stop()
 
-df["PA"] = pd.to_numeric(df["PA"], errors="coerce")
-df["Team"] = df["Team"].astype(str).str.upper()
-df["Name"] = df["Name"].astype(str).str.replace(".", "", regex=False).str.strip()
-if "Contact%" in df.columns:
-    contact = pd.to_numeric(df["Contact%"], errors="coerce")
-    needs_percent_scale = contact.dropna().abs().le(1).mean() > 0.9 if contact.notna().any() else False
-    if needs_percent_scale:
-        contact = contact * 100
-    df["Contact%"] = contact
-    df["Whiff%"] = 100 - contact
-else:
-    df["Whiff%"] = np.nan
+def eligible_players(df: pd.DataFrame) -> pd.DataFrame:
+    eligible = df[df["PA"] >= min_pa].copy()
+    return eligible if not eligible.empty else df.copy()
 
-eligible_players = df[df["PA"] >= min_pa].copy()
-if eligible_players.empty:
-    eligible_players = df.copy()
+eligible_a = eligible_players(df_a)
+eligible_b = eligible_players(df_b)
 
-player_lookup = (
-    eligible_players.sort_values(["Name", "PA"], ascending=[True, False])
+player_options_a = (
+    eligible_a.sort_values(["Name", "PA"], ascending=[True, False])
     .drop_duplicates(subset=["Name"], keep="first")
-    .sort_values("Name")
+    .sort_values("Name")["Name"]
+    .tolist()
 )
-player_options = player_lookup["Name"].tolist()
-if not player_options:
+player_options_b = (
+    eligible_b.sort_values(["Name", "PA"], ascending=[True, False])
+    .drop_duplicates(subset=["Name"], keep="first")
+    .sort_values("Name")["Name"]
+    .tolist()
+)
+
+if not player_options_a or not player_options_b:
     st.error("No players available to display.")
     st.stop()
 
-default_a = st.session_state.get("comp_player_a", player_options[0])
-if default_a not in player_options:
-    default_a = player_options[0]
-default_b = st.session_state.get("comp_player_b", player_options[1] if len(player_options) > 1 else player_options[0])
-if default_b not in player_options:
-    default_b = player_options[0]
+default_a = st.session_state.get("comp_player_a", player_options_a[0])
+if default_a not in player_options_a:
+    default_a = player_options_a[0]
+default_b = st.session_state.get("comp_player_b", player_options_b[1] if len(player_options_b) > 1 else player_options_b[0])
+if default_b not in player_options_b:
+    default_b = player_options_b[0]
 
 with controls_container:
     sel_a_col, sel_b_col = st.columns(2)
     with sel_a_col:
-        player_a = st.selectbox("Player A", player_options, index=player_options.index(default_a), key="comp_player_a")
+        player_a = st.selectbox("Player A", player_options_a, index=player_options_a.index(default_a), key="comp_player_a")
     with sel_b_col:
-        player_b = st.selectbox("Player B", player_options, index=player_options.index(default_b), key="comp_player_b")
+        player_b = st.selectbox("Player B", player_options_b, index=player_options_b.index(default_b), key="comp_player_b")
 
-if player_a == player_b:
-    st.warning("Select two different players to compare.")
-    st.stop()
-
-player_a_row = get_player_row(df, player_a)
-player_b_row = get_player_row(df, player_b)
+player_a_row = get_player_row(df_a, player_a)
+player_b_row = get_player_row(df_b, player_b)
 if player_a_row is None or player_b_row is None:
     st.error("Could not load data for one of the selected players.")
     st.stop()
 
-player_a_team = get_team_display(df, player_a)
-player_b_team = get_team_display(df, player_b)
+player_a_team = get_team_display(df_a, player_a)
+player_b_team = get_team_display(df_b, player_b)
 
 # --------------------- Stat builder setup ---------------------
-numeric_stats = [
-    col for col in df.columns
-    if pd.api.types.is_numeric_dtype(df[col])
-]
 stat_exclusions = {"Season"}
-numeric_stats = [col for col in numeric_stats if col not in stat_exclusions]
+numeric_a = [col for col in df_a.columns if pd.api.types.is_numeric_dtype(df_a[col])]
+numeric_b = [col for col in df_b.columns if pd.api.types.is_numeric_dtype(df_b[col])]
+numeric_stats = [col for col in numeric_a if col in numeric_b and col not in stat_exclusions]
 
 preferred_stats = [stat for stat in STAT_ALLOWLIST if stat in numeric_stats]
 other_stats = [stat for stat in numeric_stats if stat not in preferred_stats]
@@ -731,7 +793,7 @@ lower_better = {"K%", "O-Swing%", "Whiff%", "GB%"}
 comparison_rows = []
 winner_map: dict[str, str | None] = {}
 for stat in stats_order:
-    if stat not in df.columns:
+    if stat not in df_a.columns or stat not in df_b.columns:
         continue
     a_val = player_a_row.get(stat, np.nan)
     b_val = player_b_row.get(stat, np.nan)
@@ -747,7 +809,7 @@ for stat in stats_order:
     else:
         better = a_val < b_val if stat in lower_better else a_val > b_val
         if a_val == b_val:
-            winner = None
+            winner = "Tie"
         else:
             winner = player_a if better else player_b
 
@@ -760,8 +822,8 @@ for stat in stats_order:
 
 table_df = pd.DataFrame(comparison_rows)
 
-headshot_a = get_headshot_url(player_a, df)
-headshot_b = get_headshot_url(player_b, df)
+headshot_a = get_headshot_url(player_a, df_a)
+headshot_b = get_headshot_url(player_b, df_b)
 esc = html.escape
 
 with right_col:
@@ -772,12 +834,12 @@ with right_col:
             f"<div class=\"compare-card\">",
             "  <div class=\"headshot-row\">",
             "    <div class=\"headshot-col\">",
-            f"      <div class=\"player-meta\">{esc(str(year))} | {esc(str(player_a_team))}</div>",
+            f"      <div class=\"player-meta\">{esc(str(year_a))} | {esc(str(player_a_team))}</div>",
             f"      {f'<img src=\"{esc(headshot_a)}\" width=\"200\" />' if headshot_a else ''}",
             f"      <div class=\"player-name\">{esc(player_a)}</div>",
             "    </div>",
             "    <div class=\"headshot-col\">",
-            f"      <div class=\"player-meta\">{esc(str(year))} | {esc(str(player_b_team))}</div>",
+            f"      <div class=\"player-meta\">{esc(str(year_b))} | {esc(str(player_b_team))}</div>",
             f"      {f'<img src=\"{esc(headshot_b)}\" width=\"200\" />' if headshot_b else ''}",
             f"      <div class=\"player-name\">{esc(player_b)}</div>",
             "    </div>",
@@ -794,8 +856,8 @@ with right_col:
             raw_label = str(row["Stat"])
             stat_label = esc(raw_label)
             best = winner_map.get(raw_label)
-            a_class = "best" if best == player_a else ""
-            b_class = "best" if best == player_b else ""
+            a_class = "best" if best in {player_a, "Tie"} else ""
+            b_class = "best" if best in {player_b, "Tie"} else ""
             a_val = esc(str(row[player_a]))
             b_val = esc(str(row[player_b]))
             rows.extend([
@@ -863,6 +925,6 @@ with right_col:
         st.download_button(
             "Download PDF",
             data=pdf_buffer,
-            file_name=f"{player_a.replace(' ', '_')}_{player_b.replace(' ', '_')}_{year}_comparison.pdf",
+            file_name=f"{player_a.replace(' ', '_')}_{year_a}_vs_{player_b.replace(' ', '_')}_{year_b}.pdf",
             mime="application/pdf",
         )
