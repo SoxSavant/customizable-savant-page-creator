@@ -744,7 +744,7 @@ with right_col:
     fig.savefig(pdf_buffer, format="pdf", bbox_inches="tight", pad_inches=.25)
     pdf_buffer.seek(0)
 
-    st.pyplot(fig, use_container_width=False, clear_figure=True)
+    st.pyplot(fig, use_container_width=True, clear_figure=True)
     download_name = f"{player_name.replace(' ', '_')}_{year}_savant.pdf"
     st.download_button(
         "Download as PDF",
