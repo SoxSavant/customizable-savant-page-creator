@@ -546,7 +546,7 @@ with stat_builder_container:
         height=grid_height,
         theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        reload_data=False,
+        reload_data=True,
         fit_columns_on_grid_load=True,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         allow_unsafe_jscode=True,
@@ -839,10 +839,7 @@ with right_col:
     fig.savefig(pdf_buffer, format="pdf", bbox_inches = "tight", pad_inches = .25)
     pdf_buffer.seek(0)
 
-    img_buf = BytesIO()
-    fig.savefig(img_buf, format="png", bbox_inches="tight")
-    img_buf.seek(0)
-    st.image(img_buf, use_column_width=True)
+    st.pyplot(fig, use_container_width=True, clear_figure=True)
     download_name = f"{team_abbr}_{year}_stat_leaders.pdf"
     st.download_button(
         "Download as PDF",
