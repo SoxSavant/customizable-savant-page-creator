@@ -456,9 +456,9 @@ with stat_builder_container:
 
     with add_col:
         st.selectbox(
-            "",
+            "Add stat",
             add_options,
-            label_visibility= "hidden",
+            label_visibility="hidden",
             key=add_select_key,
             on_change=add_stat_callback,
             args=(stat_state_key, add_select_key, add_reset_key, sentinel_add),
@@ -466,7 +466,7 @@ with stat_builder_container:
 
     with remove_col:
         st.selectbox(
-            "",
+            "Remove stat",
             remove_options,
             label_visibility="hidden",
             key=remove_select_key,
