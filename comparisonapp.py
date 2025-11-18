@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import html
 from datetime import date
 from io import BytesIO
 from pybaseball import batting_stats, playerid_lookup
@@ -47,7 +48,7 @@ st.markdown(
             display: flex;
             align-items: center;
             justify-content: space-around;
-            gap: 14em;
+            gap: 14rem;
             margin-bottom: 1.2rem;
         }
         .compare-card .headshot-col {
@@ -145,6 +146,7 @@ STAT_PRESETS = {
         "BB%",
     ],
     "Standard": [
+        "WAR"
         "AVG",
         "OBP",
         "SLG",
@@ -546,7 +548,7 @@ with stat_builder_container:
 
     with add_col:
         st.selectbox(
-            "",
+            "Add stat",
             add_options,
             label_visibility="hidden",
             key=add_select_key,
@@ -556,7 +558,7 @@ with stat_builder_container:
 
     with remove_col:
         st.selectbox(
-            "",
+            "Remove stat",
             remove_options,
             label_visibility="hidden",
             key=remove_select_key,
@@ -730,7 +732,7 @@ for stat in stats_order:
     if pd.isna(a_val) and pd.isna(b_val):
         continue
 
-    label = label_map.get(stat, stat)
+    raw_label = label_map.get(stat, stat)
 
     if pd.isna(a_val):
         winner = player_b
@@ -744,16 +746,17 @@ for stat in stats_order:
             winner = player_a if better else player_b
 
     comparison_rows.append({
-        "Stat": label,
+        "Stat": raw_label,
         player_a: format_stat(stat, a_val),
         player_b: format_stat(stat, b_val),
     })
-    winner_map[label] = winner
+    winner_map[raw_label] = winner
 
 table_df = pd.DataFrame(comparison_rows)
 
 headshot_a = get_headshot_url(player_a, df)
 headshot_b = get_headshot_url(player_b, df)
+esc = html.escape
 
 with right_col:
     if table_df.empty:
@@ -763,14 +766,14 @@ with right_col:
             f"<div class=\"compare-card\">",
             "  <div class=\"headshot-row\">",
             "    <div class=\"headshot-col\">",
-            f"      <div class=\"player-meta\">{year} • {player_a_team}</div>",
-            f"      {f'<img src=\"{headshot_a}\" width=\"200\" />' if headshot_a else ''}",
-            f"      <div class=\"player-name\">{player_a}</div>",
+            f"      <div class=\"player-meta\">{esc(str(year))} • {esc(str(player_a_team))}</div>",
+            f"      {f'<img src=\"{esc(headshot_a)}\" width=\"200\" />' if headshot_a else ''}",
+            f"      <div class=\"player-name\">{esc(player_a)}</div>",
             "    </div>",
             "    <div class=\"headshot-col\">",
-            f"      <div class=\"player-meta\">{year} • {player_b_team}</div>",
-            f"      {f'<img src=\"{headshot_b}\" width=\"200\" />' if headshot_b else ''}",
-            f"      <div class=\"player-name\">{player_b}</div>",
+            f"      <div class=\"player-meta\">{esc(str(year))} • {esc(str(player_b_team))}</div>",
+            f"      {f'<img src=\"{esc(headshot_b)}\" width=\"200\" />' if headshot_b else ''}",
+            f"      <div class=\"player-name\">{esc(player_b)}</div>",
             "    </div>",
             "  </div>",
             "  <table class=\"compare-table\">",
@@ -782,15 +785,18 @@ with right_col:
             "    <tbody>",
         ]
         for _, row in table_df.iterrows():
-            stat_label = row["Stat"]
-            best = winner_map.get(stat_label)
+            raw_label = str(row["Stat"])
+            stat_label = esc(raw_label)
+            best = winner_map.get(raw_label)
             a_class = "best" if best == player_a else ""
             b_class = "best" if best == player_b else ""
+            a_val = esc(str(row[player_a]))
+            b_val = esc(str(row[player_b]))
             rows.extend([
                 "      <tr>",
-                f"        <td class=\"{a_class}\">{row[player_a]}</td>",
+                f"        <td class=\"{a_class}\">{a_val}</td>",
                 f"        <td class=\"stat-col\">{stat_label}</td>",
-                f"        <td class=\"{b_class}\">{row[player_b]}</td>",
+                f"        <td class=\"{b_class}\">{b_val}</td>",
                 "      </tr>",
             ])
         rows.extend([
