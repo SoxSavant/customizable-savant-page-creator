@@ -963,17 +963,21 @@ with right_col:
     if table_df.empty:
         st.warning("No stats available to compare.")
     else:
+        # Build headshot HTML safely before creating the rows list
+        img_a = f'<img src="{esc(headshot_a)}" width="200" />' if headshot_a else ''
+        img_b = f'<img src="{esc(headshot_b)}" width="200" />' if headshot_b else ''
+
         rows = [
-            f"<div class=\"compare-card\">",
+            "<div class=\"compare-card\">",
             "  <div class=\"headshot-row\">",
             "    <div class=\"headshot-col\">",
             f"      <div class=\"player-meta\">{esc(str(year_a))} | {esc(str(player_a_team))}</div>",
-            f"      {'<img src=\"{}\" width=\"200\" />'.format(esc(headshot_a)) if headshot_a else ''}",
+            f"      {img_a}",
             f"      <div class=\"player-name\">{esc(player_a)}</div>",
             "    </div>",
             "    <div class=\"headshot-col\">",
             f"      <div class=\"player-meta\">{esc(str(year_b))} | {esc(str(player_b_team))}</div>",
-            f"      {f'<img src=\"{esc(headshot_b)}\" width=\"200\" />' if headshot_b else ''}",
+            f"      {img_b}",
             f"      <div class=\"player-name\">{esc(player_b)}</div>",
             "    </div>",
             "  </div>",
