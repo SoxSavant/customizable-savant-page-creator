@@ -12,3 +12,5 @@ steps:
 
 images:
 - 'us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest'
+options:
+  logging: CLOUD_LOGGING_ONLY
