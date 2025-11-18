@@ -49,20 +49,22 @@ st.markdown(
             align-items: center;
             justify-content: space-around;
             gap: 14rem;
-            margin-bottom: 1.2rem;
+            margin-bottom: .2rem;
         }
         .compare-card .headshot-col {
             flex: 0 0 220px;
             text-align: center;
+            padding-top: .1rem;
         }
         .compare-card .headshot-col img {
             border: 1px solid #dcdcdc;
             border-radius: 4px;
+            width: 230px;
         }
         .compare-card .player-name {
             font-size: 1.35rem;
             font-weight: 800;
-            margin: 0.2rem 0 0 0;
+            margin: .2rem 0 0 0;
         }
         .compare-card .player-meta {
             color: #555;
@@ -72,26 +74,29 @@ st.markdown(
         .compare-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 15px;
+            font-size: 13px;
+            table-layout: fixed;
         }
         .compare-table th, .compare-table td {
             border: 1px solid #d0d0d0;
-            padding: 8px 10px;
+            padding: 5px 7px;
             text-align: center;
             background: #ffffff;
             color: #111111;
+            width: 33.333%;
         }
         .compare-table th {
             background: #f1f1f1;
             font-weight: 800;
             color: #7b0d0d;
+            font-size: 14px;
         }
         .compare-table .overall-row th {
             background: #f1f1f1;
             color: #7b0d0d;
             font-weight: 800;
-            font-size: 17px;
-            padding: 10px 0 6px 0;
+            font-size: 14px;
+            padding: 6px 0 4px 0;
             border-top: 1px solid #d0d0d0;
             border-bottom: 1px solid #d0d0d0;
             border-left: 1px solid #d0d0d0;
@@ -146,7 +151,7 @@ STAT_PRESETS = {
         "BB%",
     ],
     "Standard": [
-        "WAR"
+        "WAR",
         "AVG",
         "OBP",
         "SLG",
@@ -767,12 +772,12 @@ with right_col:
             f"<div class=\"compare-card\">",
             "  <div class=\"headshot-row\">",
             "    <div class=\"headshot-col\">",
-            f"      <div class=\"player-meta\">{esc(str(year))} • {esc(str(player_a_team))}</div>",
+            f"      <div class=\"player-meta\">{esc(str(year))} | {esc(str(player_a_team))}</div>",
             f"      {f'<img src=\"{esc(headshot_a)}\" width=\"200\" />' if headshot_a else ''}",
             f"      <div class=\"player-name\">{esc(player_a)}</div>",
             "    </div>",
             "    <div class=\"headshot-col\">",
-            f"      <div class=\"player-meta\">{esc(str(year))} • {esc(str(player_b_team))}</div>",
+            f"      <div class=\"player-meta\">{esc(str(year))} | {esc(str(player_b_team))}</div>",
             f"      {f'<img src=\"{esc(headshot_b)}\" width=\"200\" />' if headshot_b else ''}",
             f"      <div class=\"player-name\">{esc(player_b)}</div>",
             "    </div>",
