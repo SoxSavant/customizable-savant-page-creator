@@ -1015,5 +1015,7 @@ with right_col:
         ])
         rows_html = "\n".join(rows)
         st.markdown(rows_html, unsafe_allow_html=True)
+        st.caption("Note: PDF Export wasn't working well so screenshot to save.")
+        st.caption("Note: Rookies with accents, dots, or suffixes in their name may not work (no player ID, unable to search by name)")
 
         # PDF export removed; please screenshot the card if needed.
