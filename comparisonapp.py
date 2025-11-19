@@ -713,7 +713,7 @@ with controls_container:
 
     span_a_guess = span_len(st.session_state.get(single_a_key, True), "comp_year_a_start", "comp_year_a_end", single_year_a_key)
     span_b_guess = span_len(st.session_state.get(single_b_key, True), "comp_year_b_start", "comp_year_b_end", single_year_b_key)
-    dynamic_min_pa_default = max(span_a_guess, span_b_guess, 1) * 300
+    dynamic_min_pa_default = max(span_a_guess, span_b_guess, 1) * 300 if max(span_a_guess, span_b_guess, 1) > 1 else min_pa_default
 
     min_pa = st.number_input(
         "Minimum PA (for player list)",
