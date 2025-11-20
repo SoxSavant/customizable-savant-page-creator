@@ -13,6 +13,19 @@ steps:
         "Dockerfile.comparison",
         ".",
       ]
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      [
+        "run",
+        "deploy",
+        "comparisonapp",
+        "--image=us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest",
+        "--region=us-central1",
+        "--platform=managed",
+        "--allow-unauthenticated",
+        "--quiet",
+      ]
 
 images:
   - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest"

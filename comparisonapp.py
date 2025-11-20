@@ -1,5 +1,3 @@
-import os
-import time
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,10 +7,9 @@ import io
 import unicodedata
 import re
 import json
-os.environ.setdefault("AGGRID_RELEASE", "True")
 from datetime import date
 from pathlib import Path
-from pybaseball import batting_stats, fielding_stats, playerid_lookup
+from pybaseball import batting_stats, fielding_stats, playerid_lookup, bwar_bat
 from pybaseball.statcast_fielding import statcast_outs_above_average
 from st_aggrid import (
     AgGrid,
@@ -22,57 +19,6 @@ from st_aggrid import (
     JsCode,
 )
 import requests
-
-
-def safe_aggrid(df, **kwargs):
-    """
-    Retries AG Grid loading up to 3 times to avoid Streamlit component
-    handshake failures in production environments like Cloud Run.
-    """
-    class _DFProxy(pd.DataFrame):
-        @property
-        def _constructor(self):
-            return _DFProxy
-        def __bool__(self):
-            return True
-
-    grid_opts = kwargs.pop("gridOptions", {}) or {}
-    if "rowData" in grid_opts:
-        grid_opts = dict(grid_opts)
-        grid_opts.pop("rowData", None)
-
-    data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
-    for attempt in range(3):
-        try:
-            return AgGrid(data=data_arg, gridOptions=grid_opts, **kwargs)
-        except Exception:
-            if attempt == 2:
-                raise
-            time.sleep(0.3)
-
-
-
-GRID_THEME = "balham"
-GRID_CUSTOM_CSS = {
-    ".ag-root-wrapper": {"border": "1px solid #2d2d2d"},
-    ".ag-root": {"background-color": "#1b1b1d"},
-    ".ag-header": {"background-color": "#2c2c2c", "color": "#dcdcdc"},
-    ".ag-header-row": {"background-color": "#2c2c2c", "color": "#dcdcdc"},
-    ".ag-row": {"color": "#e0e0e0"},
-    ".ag-row-odd": {"background-color": "#1f1f1f"},
-    ".ag-row-even": {"background-color": "#242424"},
-    ".ag-center-cols-viewport": {"background-color": "#1b1b1d"},
-    ".ag-body-viewport": {"background-color": "#1b1b1d"},
-    ".ag-center-cols-container": {"background-color": "#1b1b1d"},
-    ".ag-body-horizontal-scroll-viewport": {"background-color": "#1b1b1d"},
-    ".ag-body-vertical-scroll-viewport": {"background-color": "#1b1b1d"},
-    ".ag-rich-select-popup": {"background-color": "#1b1b1d", "color": "#f0f0f0"},
-    ".ag-rich-select-list": {"background-color": "#1b1b1d"},
-    ".ag-virtual-list-viewport": {"background-color": "#1b1b1d"},
-    ".ag-list-item": {"background-color": "#1b1b1d", "color": "#f0f0f0"},
-    ".ag-list-item.ag-active-item": {"background-color": "#2c2c2c", "color": "#f0f0f0"},
-    ".ag-rich-select-value": {"color": "#f0f0f0"},
-}
 
 st.set_page_config(page_title="Player Comparison App", layout="wide")
 
@@ -590,6 +536,23 @@ def load_local_bwar_data() -> pd.DataFrame:
 def load_bwar_dataset(local_sig: float) -> pd.DataFrame:
     _ = local_sig  # cache key
     frames: list[pd.DataFrame] = []
+    try:
+        data = bwar_bat(return_all=True)
+    except Exception:
+        data = None
+    if data is not None and not data.empty:
+        data = data.copy()
+        data["year_ID"] = pd.to_numeric(data.get("year_ID"), errors="coerce")
+        data["WAR"] = pd.to_numeric(data.get("WAR"), errors="coerce")
+        if "pitcher" in data.columns:
+            data = data[pd.to_numeric(data["pitcher"], errors="coerce").fillna(1) == 0]
+        data["Name"] = data["name_common"].astype(str).str.strip()
+        data["NameKey"] = data["Name"].apply(normalize_statcast_name)
+        player_series = data["player_ID"] if "player_ID" in data.columns else pd.Series("", index=data.index)
+        data["player_ID"] = player_series.astype(str).str.strip().str.lower()
+        mlb_series = data["mlb_ID"] if "mlb_ID" in data.columns else pd.Series(np.nan, index=data.index)
+        data["mlb_ID"] = pd.to_numeric(mlb_series, errors="coerce")
+        frames.append(data[["NameKey", "Name", "year_ID", "WAR", "player_ID", "mlb_ID"]])
 
     local = load_local_bwar_data()
     if local is not None and not local.empty:
@@ -621,13 +584,6 @@ def load_bwar_span(
     if pool.empty:
         return pd.DataFrame()
 
-    def clean_key(val: str) -> str:
-        try:
-            val = unicodedata.normalize("NFKD", val).encode("ascii", "ignore").decode()
-        except Exception:
-            pass
-        return "".join(ch for ch in str(val) if ch.isalnum()).lower()
-
     def match_by_names() -> pd.DataFrame:
         if not target_names:
             return pd.DataFrame()
@@ -635,16 +591,6 @@ def load_bwar_span(
         if not keys:
             return pd.DataFrame()
         return pool[pool["NameKey"].isin(keys)]
-
-    def match_by_clean_name() -> pd.DataFrame:
-        if not target_names:
-            return pd.DataFrame()
-        targets = {clean_key(name) for name in target_names if name}
-        if not targets:
-            return pd.DataFrame()
-        pool_local = pool.copy()
-        pool_local["__clean"] = pool_local["Name"].astype(str).apply(clean_key)
-        return pool_local[pool_local["__clean"].isin(targets)]
 
     def match_by_bbref() -> pd.DataFrame:
         if not target_bbref:
@@ -674,10 +620,6 @@ def load_bwar_span(
             df = alt
     if df.empty:
         alt = match_by_mlbam()
-        if not alt.empty:
-            df = alt
-    if df.empty:
-        alt = match_by_clean_name()
         if not alt.empty:
             df = alt
     if df.empty:
@@ -1711,8 +1653,7 @@ with stat_builder_container:
         """
     )
 
-    gb = GridOptionsBuilder()
-    gb.configure_columns(list(stat_config_df.columns))
+    gb = GridOptionsBuilder.from_dataframe(stat_config_df)
     gb.configure_default_column(
         editable=True,
         filter=False,
@@ -1757,20 +1698,19 @@ with stat_builder_container:
     )
 
     grid_options = gb.build()
-    grid_options.pop("rowData", None)
 
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"comp_stat_grid_{st.session_state.get(stat_version_key, 0)}"
-    grid_response = safe_aggrid(
+    grid_response = AgGrid(
         stat_config_df,
         gridOptions=grid_options,
         height=grid_height,
         width="100%",
-        theme=GRID_THEME,
-        custom_css=GRID_CUSTOM_CSS,
+        theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
+        reload_data=True,
         fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.GRID_CHANGED,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,
@@ -1955,8 +1895,6 @@ with right_col:
         rows_html = "\n".join(rows)
         st.markdown(rows_html, unsafe_allow_html=True)
         st.caption("PDF Export wasn't working, so screenshot to save.")
-        st.caption("If dragging doesn't update in table, drag it again.")
         st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
         st.caption("TZ records ended in 2001, DRS started in 2002")
         st.caption("Rookies with accents, initials, etc. may not return a headshot")
-       
