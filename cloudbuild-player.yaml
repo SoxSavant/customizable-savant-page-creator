@@ -5,7 +5,7 @@ steps:
       "-t",
       "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest",
       "-f",
-      "Dockerfile.team",
+      "Dockerfile.player",
       "."
     ]
 
