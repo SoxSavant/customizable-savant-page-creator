@@ -9,21 +9,31 @@ import matplotlib.image as mpimg
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from pathlib import Path
-from io import BytesIO, StringIO
-import re
-import requests
+from io import BytesIO
 os.environ.setdefault("AGGRID_RELEASE", "True")
-from pybaseball import batting_stats, fielding_stats
-from pybaseball.statcast_fielding import statcast_outs_above_average
+from pybaseball import batting_stats, fielding_stats, bwar_bat
 from datetime import date
 from st_aggrid import (
     AgGrid,
     GridOptionsBuilder,
     GridUpdateMode,
     DataReturnMode,
+    JsCode,
 )
 
 
+def safe_aggrid(df, **kwargs):
+    """
+    Retries AG Grid loading up to 3 times to avoid Streamlit component
+    handshake failures in production environments like Cloud Run.
+    """
+    for attempt in range(3):
+        try:
+            return AgGrid(df, **kwargs)
+        except Exception:
+            if attempt == 2:
+                raise  # rethrow after last attempt
+            time.sleep(0.3)
 
 
 GRID_THEME = "balham"
@@ -194,7 +204,6 @@ STAT_ALLOWLIST = [
 ]
 
 FIELDING_COLS = ["DRS", "TZ", "UZR", "FRM"]
-STATCAST_FIELDING_START_YEAR = 2016
 LOCAL_BWAR_FILE = Path(__file__).with_name("warhitters2025.txt")
 
 
@@ -249,6 +258,19 @@ def load_local_bwar_data():
 def load_bwar_dataset(local_sig: float) -> pd.DataFrame:
     _ = local_sig
     frames: list[pd.DataFrame] = []
+    try:
+        data = bwar_bat(return_all=True)
+    except Exception:
+        data = None
+    if data is not None and not data.empty:
+        data = data.copy()
+        data["year_ID"] = pd.to_numeric(data.get("year_ID"), errors="coerce")
+        data["WAR"] = pd.to_numeric(data.get("WAR"), errors="coerce")
+        if "pitcher" in data.columns:
+            data = data[pd.to_numeric(data["pitcher"], errors="coerce").fillna(1) == 0]
+        data["Name"] = data["name_common"].astype(str).str.strip()
+        data["NameKey"] = data["Name"].apply(normalize_name_key)
+        frames.append(data[["NameKey", "Name", "year_ID", "WAR"]])
 
     local = load_local_bwar_data()
     if local is not None and not local.empty:
@@ -298,119 +320,6 @@ def load_fielding_year(year: int) -> pd.DataFrame:
     agg = df.groupby(["NameKey"], as_index=False)[FIELDING_COLS].sum(min_count=1)
     return agg
 
-
-def reorder_savant_name(raw: str) -> str:
-    if not raw or not isinstance(raw, str):
-        return ""
-    raw = raw.replace("\xa0", " ").strip()
-    if "," in raw:
-        last, first = raw.split(",", 1)
-        return f"{first.strip()} {last.strip()}".strip()
-    return raw
-
-
-def fetch_csv(url: str) -> pd.DataFrame:
-    try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-    except Exception:
-        return pd.DataFrame()
-    try:
-        data = StringIO(resp.content.decode("utf-8"))
-        df = pd.read_csv(data)
-    except Exception:
-        return pd.DataFrame()
-    return df
-
-
-def load_savant_frv_year(year: int) -> pd.DataFrame:
-    url = (
-        "https://baseballsavant.mlb.com/leaderboard/fielding-run-value?"
-        f"gameType=Regular&seasonStart={year}&seasonEnd={year}"
-        "&type=fielder&position=&minInnings=0&minResults=1&csv=true"
-    )
-    df = fetch_csv(url)
-    if df is None or df.empty:
-        return pd.DataFrame()
-    df = df.rename(
-        columns={
-            "name": "NameRaw",
-            "total_runs": "FRV",
-            "arm_runs": "ARM",
-            "range_runs": "RANGE",
-        }
-    )
-    df["Name"] = df["NameRaw"].apply(reorder_savant_name)
-    df["NameKey"] = df["Name"].apply(normalize_name_key)
-    for metric in ["FRV", "ARM", "RANGE"]:
-        df[metric] = pd.to_numeric(df.get(metric), errors="coerce")
-    return df[["NameKey", "Name", "FRV", "ARM", "RANGE"]]
-
-
-def load_savant_oaa_year(year: int) -> pd.DataFrame:
-    try:
-        df = statcast_outs_above_average(year, "all")
-    except Exception:
-        return pd.DataFrame()
-    if df is None or df.empty:
-        return pd.DataFrame()
-    df = df.copy()
-    name_col = None
-    for col in ["player_name", "last_name, first_name", "name"]:
-        if col in df.columns:
-            name_col = col
-            break
-    if not name_col:
-        return pd.DataFrame()
-    if name_col == "last_name, first_name":
-        df["Name"] = df[name_col].apply(reorder_savant_name)
-    else:
-        df["Name"] = df[name_col].astype(str).str.strip()
-    df["NameKey"] = df["Name"].apply(normalize_name_key)
-    oaa_col = None
-    for col in ["outs_above_average", "oaa"]:
-        if col in df.columns:
-            oaa_col = col
-            break
-    if not oaa_col:
-        return pd.DataFrame()
-    df["OAA"] = pd.to_numeric(df[oaa_col], errors="coerce")
-    return df[["NameKey", "Name", "OAA"]]
-
-
-@st.cache_data(show_spinner=False, ttl=900)
-def load_statcast_fielding_year(year: int) -> pd.DataFrame:
-    if year < STATCAST_FIELDING_START_YEAR:
-        return pd.DataFrame()
-    frv = load_savant_frv_year(year)
-    oaa = load_savant_oaa_year(year)
-    if (frv is None or frv.empty) and (oaa is None or oaa.empty):
-        return pd.DataFrame()
-    if frv is None or frv.empty:
-        combined = oaa.copy()
-    elif oaa is None or oaa.empty:
-        combined = frv.copy()
-    else:
-        combined = pd.merge(
-            frv,
-            oaa,
-            on=["NameKey", "Name"],
-            how="outer",
-        )
-    for metric in ["FRV", "OAA", "ARM", "RANGE"]:
-        if metric not in combined.columns:
-            combined[metric] = np.nan
-        else:
-            combined[metric] = pd.to_numeric(combined[metric], errors="coerce")
-    agg = combined.groupby("NameKey", as_index=False).agg({
-        "Name": "first",
-        "FRV": lambda s: s.sum(min_count=1),
-        "OAA": lambda s: s.sum(min_count=1),
-        "ARM": lambda s: s.sum(min_count=1),
-        "RANGE": lambda s: s.sum(min_count=1),
-    })
-    return agg
-
 @st.cache_data(show_spinner=True, ttl=900)
 def load_batting(y: int) -> pd.DataFrame:
     base = batting_stats(y, y, qual=0)
@@ -425,13 +334,7 @@ def load_batting(y: int) -> pd.DataFrame:
     field_df = load_fielding_year(y)
     if field_df is not None and not field_df.empty:
         df = df.merge(field_df, on="NameKey", how="left")
-    statcast_df = load_statcast_fielding_year(y)
-    if statcast_df is not None and not statcast_df.empty:
-        df = df.merge(statcast_df[["NameKey", "FRV", "OAA", "ARM", "RANGE"]], on="NameKey", how="left")
     for col in ["bWAR"] + FIELDING_COLS:
-        if col not in df.columns:
-            df[col] = np.nan
-    for col in ["FRV", "OAA", "ARM", "RANGE"]:
         if col not in df.columns:
             df[col] = np.nan
     return df
@@ -555,6 +458,38 @@ remove_select_key = "remove_stat_select"
 add_reset_key = "reset_add_select"
 remove_reset_key = "reset_remove_select"
 stat_version_key = "stat_config_version"
+
+# --- AG Grid Checkbox Renderer JS ---
+show_checkbox_renderer = JsCode(
+    """
+    class ShowCheckboxRenderer {
+        init(params) {
+            this.params = params;
+            this.eGui = document.createElement('div');
+            this.eGui.style.display = 'flex';
+            this.eGui.style.justifyContent = 'center';
+            this.eGui.style.alignItems = 'center';
+            this.eGui.style.height = '100%';
+            this.eGui.style.width = '100%';
+            this.checkbox = document.createElement('input');
+            this.checkbox.type = 'checkbox';
+            this.checkbox.checked = Boolean(params.value);
+            this.checkbox.addEventListener('change', () => {
+                params.node.setDataValue(params.column.colId, this.checkbox.checked);
+            });
+            this.eGui.appendChild(this.checkbox);
+        }
+        getGui() {
+            return this.eGui;
+        }
+        refresh(params) {
+            this.checkbox.checked = Boolean(params.value);
+            return true;
+        }
+    }
+    """
+)
+# --- End AG Grid Checkbox Renderer JS ---
 
 # --- Callbacks ---
 def bump_stat_config_version():
@@ -789,10 +724,9 @@ with stat_builder_container:
     gb.configure_column(
         "Show",
         header_name="Show",
-        editable=True,
-        cellRenderer="agCheckboxCellRenderer",
-        cellEditor="agCheckboxCellEditor",
-        width=110,
+        cellRenderer=show_checkbox_renderer,
+        editable=False,
+        width=100,
         suppressMenu=True,
     )
     gb.configure_column(
@@ -804,25 +738,22 @@ with stat_builder_container:
         autoHeight=True,
         flex=1,
     )
-    grid_options = gb.build()
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"stat_builder_grid_{st.session_state.get(stat_version_key, 0)}"
-    time.sleep(0.1)
-    grid_response = AgGrid(
+    grid_response = safe_aggrid(
         stat_config_df,
-        gridOptions=grid_options,
+        gridOptions=gb.build(),
         height=grid_height,
-        width="100%",
         theme=GRID_THEME,
         custom_css=GRID_CUSTOM_CSS,
         data_return_mode=DataReturnMode.AS_INPUT,
         reload_data=True,
         fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
+        update_mode=GridUpdateMode.MODEL_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,
-        update_on=["rowDragEnd", "cellValueChanged"],
+        update_on=["rowDragEnd", "cellValueChanged"], 
     )
 
 grid_records = None
@@ -1117,5 +1048,3 @@ with right_col:
         file_name=download_name,
         mime="application/pdf",
     )
-    st.caption("If dragging doesn't update in table, drag it again.")
-    st.caption("TZ records ended in 2001, DRS started in 2002")
