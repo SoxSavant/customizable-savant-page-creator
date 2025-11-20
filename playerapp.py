@@ -919,7 +919,7 @@ with stat_builder_container:
     )
 
     grid_options = gb.build()
-    grid_options["rowData"] = None
+    grid_options.pop("rowData", None)
 
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"stat_grid_{st.session_state.get(stat_version_key, 0)}"
