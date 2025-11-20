@@ -37,10 +37,15 @@ def safe_aggrid(df, **kwargs):
         def __bool__(self):
             return True
 
+    grid_opts = kwargs.get("gridOptions", {})
+    if "rowData" in grid_opts and grid_opts["rowData"] is not None:
+        grid_opts["rowData"] = None
+    kwargs["gridOptions"] = grid_opts
+
     data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
     for attempt in range(3):
         try:
-            return AgGrid(data_arg, **kwargs)
+            return AgGrid(data=data_arg, **kwargs)
         except Exception:
             if attempt == 2:
                 raise  # rethrow after last attempt
@@ -871,7 +876,7 @@ with stat_builder_container:
         flex=1,
     )
     grid_options = gb.build()
-    grid_options.pop("rowData", None)
+    grid_options["rowData"] = None
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"stat_builder_grid_{st.session_state.get(stat_version_key, 0)}"
     time.sleep(0.1)
