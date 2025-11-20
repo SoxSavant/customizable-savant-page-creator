@@ -26,24 +26,16 @@ from st_aggrid import (
 def safe_aggrid(df, **kwargs):
     """
     Retries AG Grid loading up to 3 times to avoid Streamlit component
-    handshake failures in production environments like Cloud Run, and
-    avoids double-supplying data (both `data` arg and gridOptions.rowData).
+    handshake failures in production environments like Cloud Run.
     """
     class _DFProxy(pd.DataFrame):
         @property
         def _constructor(self):
             return _DFProxy
         def __bool__(self):
-            # Always truthy so Streamlit doesn't treat empty dataframes as False
             return True
 
-    # If gridOptions already has rowData, don't also pass df as the data argument.
-    grid_opts = kwargs.get("gridOptions")
-    if isinstance(grid_opts, dict) and "rowData" in grid_opts:
-        data_arg = None
-    else:
-        data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
-
+    data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
     for attempt in range(3):
         try:
             return AgGrid(data_arg, **kwargs)
@@ -855,7 +847,6 @@ with stat_builder_container:
     stat_config_df.insert(0, "Drag", ["↕"] * len(stat_config_df))
 
     gb = GridOptionsBuilder.from_dataframe(stat_config_df)
-    gb.configure_grid_options(rowData=None)
     gb.configure_default_column(
         editable=True,
         filter=False,
