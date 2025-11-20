@@ -217,6 +217,9 @@ STAT_PRESETS = {
         "FB%",
         "LD%",
     ],
+    "Blank – Create your own": [
+        "WAR",
+    ],
 }
 
 STAT_ALLOWLIST = [
@@ -225,7 +228,7 @@ STAT_ALLOWLIST = [
     "BABIP", "G", "PA", "AB", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
     "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
     "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
-    "FRV", "OAA", "ARM", "RANGE", "DRS", "TZ", "FRM", "UZR", "bWAR",
+    "FRV", "OAA", "ARM", "RANGE", "DRS", "TZ", "FRM", "UZR", "bWAR", "Age",
 ]
 STATCAST_FIELDING_START_YEAR = 2016
 FIELDING_STATS = ["DRS", "TZ", "UZR", "FRM", "FRV", "OAA", "ARM", "RANGE", "bWAR"]
@@ -337,6 +340,16 @@ def aggregate_player_group(grp: pd.DataFrame, name: str | None = None) -> dict:
         series = pd.to_numeric(grp[col], errors="coerce")
         if series.isna().all():
             continue
+        if col == "Age":
+            age_min = series.min(skipna=True)
+            age_max = series.max(skipna=True)
+            if pd.isna(age_min) or pd.isna(age_max):
+                continue
+            if abs(age_min - age_max) < 0.01:
+                result[col] = float(age_min)
+            else:
+                result[col] = f"{int(round(age_min))}-{int(round(age_max))}"
+            continue
         if col in SUM_STATS:
             result[col] = series.sum(skipna=True)
         elif col in RATE_STATS and pa_total > 0:
@@ -351,45 +364,58 @@ def load_batting(start_year: int, end_year: int) -> pd.DataFrame:
     """Load aggregated batting stats for a single year or a span of years."""
     start = min(start_year, end_year)
     end = max(start_year, end_year)
-    try:
-        df = batting_stats(start, end, qual=0, split_seasons=False)
-        if df is not None and not df.empty:
-            return df
-    except Exception:
-        # Fall back silently to per-year fetches
-        pass
 
-    chunk_size = 10
+    # Single year: return directly
+    if start == end:
+        try:
+            df = batting_stats(start, end, qual=0, split_seasons=False)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass
+        fallback = load_year(start)
+        return fallback if fallback is not None else pd.DataFrame()
+
+    # Multi-year: always build from per-year frames so Age spans are accurate
     frames = []
     failed_years = []
-    for chunk_start in range(start, end + 1, chunk_size):
-        chunk_end = min(chunk_start + chunk_size - 1, end)
+    for year in range(start, end + 1):
         try:
-            chunk_df = batting_stats(
-                chunk_start,
-                chunk_end,
-                qual=0,
-                split_seasons=False,
-            )
+            yearly = batting_stats(year, year, qual=0, split_seasons=False)
         except Exception:
-            chunk_df = None
-        if chunk_df is not None and not chunk_df.empty:
-            frames.append(chunk_df)
-            continue
-        for year in range(chunk_start, chunk_end + 1):
+            yearly = None
+        if yearly is None or yearly.empty:
             try:
                 yearly = load_year(year)
-                if yearly is not None and not yearly.empty:
-                    frames.append(yearly)
-                else:
-                    failed_years.append(year)
             except Exception:
-                failed_years.append(year)
+                yearly = None
+        if yearly is not None and not yearly.empty:
+            frames.append(yearly)
+        else:
+            failed_years.append(year)
     if frames:
         combined = pd.concat(frames, ignore_index=True)
+
+        age_span_map: dict[str, str | float] = {}
+        if "Name" in combined.columns and "Age" in combined.columns:
+            for name, grp in combined.groupby("Name"):
+                series = pd.to_numeric(grp["Age"], errors="coerce")
+                if series.isna().all():
+                    continue
+                age_min = series.min(skipna=True)
+                age_max = series.max(skipna=True)
+                if pd.isna(age_min) or pd.isna(age_max):
+                    continue
+                if abs(age_min - age_max) < 0.01:
+                    age_span_map[name] = float(age_min)
+                else:
+                    age_span_map[name] = f"{int(round(age_min))}-{int(round(age_max))}"
+
         grouped_rows = []
         for name, grp in combined.groupby("Name"):
             row = aggregate_player_group(grp, name)
+            if age_span_map and name in age_span_map:
+                row["Age"] = age_span_map[name]
             grouped_rows.append(row)
         aggregated = pd.DataFrame(grouped_rows)
         if failed_years:
@@ -716,16 +742,19 @@ def normalize_display_team(team_value: str) -> str:
 
 @st.cache_data(show_spinner=False, ttl=900)
 def load_player_batting_profile(fg_id: int, start_year: int, end_year: int) -> pd.Series | None:
-    try:
-        df = batting_stats(start_year, end_year, qual=0, split_seasons=False, players=str(fg_id))
-    except Exception:
-        df = None
-    if df is not None and not df.empty:
-        row = df.iloc[0].copy()
-        row["TeamDisplay"] = normalize_display_team(str(row.get("Team", "")).strip())
-        row["Name"] = str(row.get("Name", "")).strip()
-        return row
-    frames = []
+    # For spans, always build from per-year data so Age can be a range.
+    frames: list[pd.DataFrame] = []
+    if start_year == end_year:
+        try:
+            df = batting_stats(start_year, end_year, qual=0, split_seasons=False, players=str(fg_id))
+        except Exception:
+            df = None
+        if df is not None and not df.empty:
+            row = df.iloc[0].copy()
+            row["TeamDisplay"] = normalize_display_team(str(row.get("Team", "")).strip())
+            row["Name"] = str(row.get("Name", "")).strip()
+            return row
+
     for year in range(start_year, end_year + 1):
         try:
             yearly = batting_stats(year, year, qual=0, split_seasons=False, players=str(fg_id))
@@ -1412,6 +1441,9 @@ stat_exclusions = {"Season"}
 numeric_a = [col for col in df_a.columns if pd.api.types.is_numeric_dtype(df_a[col])]
 numeric_b = [col for col in df_b.columns if pd.api.types.is_numeric_dtype(df_b[col])]
 numeric_stats = [col for col in numeric_a if col in numeric_b and col not in stat_exclusions]
+# Ensure Age is available even if represented as a string span.
+if "Age" in df_a.columns and "Age" in df_b.columns and "Age" not in numeric_stats:
+    numeric_stats.append("Age")
 
 preferred_stats = [stat for stat in STAT_ALLOWLIST if stat in numeric_stats]
 other_stats = [stat for stat in numeric_stats if stat not in preferred_stats]
@@ -1694,6 +1726,12 @@ def format_stat(stat: str, val) -> str:
     if upper_stat == "ARM":
         return f"{int(round(float(val)))}"
 
+    if upper_stat == "AGE":
+        if isinstance(val, str):
+            return val
+        v = float(val)
+        return f"{int(round(v))}" if abs(v - round(v)) < 1e-9 else f"{v:.1f}"
+
     if upper_stat in {"WAR", "BWAR", "FWAR", "EV", "AVG EXIT VELO", "OFF", "DEF", "BSR"}:
         v = float(val)
         if abs(v - round(v)) < 1e-9:
@@ -1740,14 +1778,28 @@ for stat in stats_order:
     b_val = player_b_row.get(stat, np.nan)
     raw_label = label_map.get(stat, stat)
 
+    # Age spans (or any non-numeric values): skip winner comparison
+    num_compare = False
+    if stat.upper() == "AGE":
+        winner = None
+    else:
+        try:
+            a_num = float(a_val)
+            b_num = float(b_val)
+            num_compare = True
+        except Exception:
+            num_compare = False
+
     if pd.isna(a_val) and pd.isna(b_val):
         winner = None
     elif pd.isna(a_val):
         winner = player_b_col_label
     elif pd.isna(b_val):
         winner = player_a_col_label
+    elif not num_compare:
+        winner = None
     else:
-        better = a_val < b_val if stat in lower_better else a_val > b_val
+        better = a_num < b_num if stat in lower_better else a_num > b_num
         if a_val == b_val:
             winner = "Tie"
         else:
@@ -1822,8 +1874,7 @@ with right_col:
         ])
         rows_html = "\n".join(rows)
         st.markdown(rows_html, unsafe_allow_html=True)
-        st.caption("PDF Export wasn't working, so screenshot to save.")
+        st.caption("Screenshot to save")
         st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
         st.caption("TZ records ended in 2001, DRS started in 2002")
         st.caption("Rookies with accents, initials, etc. may not return a headshot")
-       

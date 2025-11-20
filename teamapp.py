@@ -696,8 +696,22 @@ with stat_builder_container:
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    cleaned_config = normalize_stat_rows(st.session_state.get(stat_state_key, current_stat_config), preset_base_config)
-    st.session_state[stat_state_key] = cleaned_config
+    stat_config_df = pd.DataFrame(current_stat_config)
+    if stat_config_df.empty:
+        stat_config_df = pd.DataFrame(preset_base_config)
+    if "Show" not in stat_config_df.columns:
+        stat_config_df["Show"] = True
+    if "Stat" not in stat_config_df.columns:
+        stat_config_df["Stat"] = preset_base_config[0]["Stat"]
+    stat_config_df = stat_config_df[["Show", "Stat"]].copy()
+    stat_config_df["Show"] = stat_config_df["Show"].apply(
+        lambda val: True
+        if pd.isna(val)
+        else val.strip().lower() in TRUTHY_STRINGS
+        if isinstance(val, str)
+        else bool(val)
+    )
+    stat_config_df.insert(0, "Drag", ["↕"] * len(stat_config_df))
 
 stats_order = [row["Stat"] for row in st.session_state[stat_state_key] if row.get("Show", True)]
 if not stats_order:
