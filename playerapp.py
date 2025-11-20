@@ -440,26 +440,26 @@ with left_col:
 with controls_container:
     year = st.slider("Season", 1900, date.today().year, date.today().year)
 
-# Player input controls (name or FanGraphs ID)
-player_mode = st.selectbox(
-    "Player Input",
-    ["Name", "FanGraphs ID"],
-    key="player_input_mode",
-)
-if player_mode == "Name":
-    player_name_input = st.text_input(
-        "Player Name",
-        st.session_state.get("player_name_input", "Mookie Betts"),
-        key="player_name_input",
+    # Player input controls (name or FanGraphs ID)
+    player_mode = st.selectbox(
+        "Player Input",
+        ["Name", "FanGraphs ID"],
+        key="player_input_mode",
     )
-    player_id_input = st.session_state.get("player_id_input", "")
-else:
-    player_id_input = st.text_input(
-        "Player FanGraphs ID",
-        st.session_state.get("player_id_input", ""),
-        key="player_id_input",
-    )
-    player_name_input = st.session_state.get("player_name_input", "")
+    if player_mode == "Name":
+        player_name_input = st.text_input(
+            "Player Name",
+            st.session_state.get("player_name_input", "Mookie Betts"),
+            key="player_name_input",
+        )
+        player_id_input = st.session_state.get("player_id_input", "")
+    else:
+        player_id_input = st.text_input(
+            "Player FanGraphs ID",
+            st.session_state.get("player_id_input", ""),
+            key="player_id_input",
+        )
+        player_name_input = st.session_state.get("player_name_input", "")
 # --------------------- Data ---------------------
 df = load_batting(year).copy()
 
@@ -884,6 +884,7 @@ with stat_builder_container:
 
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"stat_grid_{st.session_state.get(stat_version_key, 0)}"
+    time.sleep(0.1)
     grid_response = safe_aggrid(
         stat_config_df,
         gridOptions=grid_options,
@@ -894,11 +895,10 @@ with stat_builder_container:
         data_return_mode=DataReturnMode.AS_INPUT,
         reload_data=True,
         fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.GRID_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,
-        update_on=["rowDragEnd", "cellValueChanged"],
+        update_on=["selectionChanged"],
     )
 
 grid_df = None
@@ -1130,3 +1130,6 @@ with right_col:
         file_name=download_name,
         mime="application/pdf",
     )
+    st.caption("If dragging doesn't update in table, drag it again.")
+    st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
+    st.caption("TZ records ended in 2001, DRS started in 2002")

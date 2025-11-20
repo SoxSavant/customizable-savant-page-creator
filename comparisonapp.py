@@ -1957,6 +1957,7 @@ with right_col:
         rows_html = "\n".join(rows)
         st.markdown(rows_html, unsafe_allow_html=True)
         st.caption("PDF Export wasn't working, so screenshot to save.")
+        st.caption("If dragging doesn't update in table, drag it again.")
         st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
         st.caption("TZ records ended in 2001, DRS started in 2002")
         st.caption("Rookies with accents, initials, etc. may not return a headshot")

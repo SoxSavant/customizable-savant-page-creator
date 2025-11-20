@@ -863,6 +863,7 @@ with stat_builder_container:
     )
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"stat_builder_grid_{st.session_state.get(stat_version_key, 0)}"
+    time.sleep(0.1)
     grid_response = safe_aggrid(
         stat_config_df,
         gridOptions=gb.build(),
@@ -872,11 +873,10 @@ with stat_builder_container:
         data_return_mode=DataReturnMode.AS_INPUT,
         reload_data=True,
         fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.GRID_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,
-        update_on=["rowDragEnd", "cellValueChanged"], 
+        update_on=["selectionChanged"], 
     )
 
 grid_records = None
@@ -1171,3 +1171,5 @@ with right_col:
         file_name=download_name,
         mime="application/pdf",
     )
+    st.caption("If dragging doesn't update in table, drag it again.")
+    st.caption("TZ records ended in 2001, DRS started in 2002")
