@@ -1,35 +1,39 @@
 steps:
   - name: "gcr.io/cloud-builders/docker"
-    args:
-      [
-        "build",
-        "--cache-from",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:cache",
-        "--tag",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest",
-        "--tag",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:cache",
-        "-f",
-        "Dockerfile.comparison",
-        ".",
-      ]
+    args: [
+      "build",
+      "-t",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest",
+      "-f",
+      "Dockerfile.comparison",
+      "."
+    ]
+
+  - name: "gcr.io/cloud-builders/docker"
+    args: [
+      "push",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest"
+    ]
+
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    entrypoint: gcloud
-    args:
-      [
-        "run",
-        "deploy",
-        "comparisonapp",
-        "--image=us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest",
-        "--region=us-central1",
-        "--platform=managed",
-        "--allow-unauthenticated",
-        "--quiet",
-      ]
+    entrypoint: "gcloud"
+    args: [
+      "run",
+      "deploy",
+      "comparisonapp",
+      "--image",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest",
+      "--region",
+      "us-central1",
+      "--allow-unauthenticated",
+      "--memory",
+      "2Gi",
+      "--port",
+      "8080"
+    ]
 
 images:
   - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:latest"
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/comparisonapp:cache"
 
 options:
   logging: CLOUD_LOGGING_ONLY

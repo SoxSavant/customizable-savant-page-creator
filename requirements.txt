@@ -3,4 +3,4 @@ pandas
 numpy
 matplotlib
 pybaseball==2.2.7
-streamlit-aggrid==1.2.0.post1
+streamlit-aggrid==0.3.4.post3

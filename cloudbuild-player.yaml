@@ -1,35 +1,39 @@
 steps:
   - name: "gcr.io/cloud-builders/docker"
-    args:
-      [
-        "build",
-        "--cache-from",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:cache",
-        "--tag",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest",
-        "--tag",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:cache",
-        "-f",
-        "Dockerfile.player",
-        ".",
-      ]
+    args: [
+      "build",
+      "-t",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest",
+      "-f",
+      "Dockerfile.team",
+      "."
+    ]
+
+  - name: "gcr.io/cloud-builders/docker"
+    args: [
+      "push",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest"
+    ]
+
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    entrypoint: gcloud
-    args:
-      [
-        "run",
-        "deploy",
-        "playerapp",
-        "--image=us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest",
-        "--region=us-central1",
-        "--platform=managed",
-        "--allow-unauthenticated",
-        "--quiet",
-      ]
+    entrypoint: "gcloud"
+    args: [
+      "run",
+      "deploy",
+      "teamapp",
+      "--image",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest",
+      "--region",
+      "us-central1",
+      "--allow-unauthenticated",
+      "--memory",
+      "2Gi",
+      "--port",
+      "8080"
+    ]
 
 images:
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest"
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:cache"
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest"
 
 options:
   logging: CLOUD_LOGGING_ONLY
