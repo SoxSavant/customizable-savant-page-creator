@@ -6,7 +6,9 @@ import html
 import io
 import unicodedata
 import re
+import json
 from datetime import date
+from pathlib import Path
 from pybaseball import batting_stats, fielding_stats, playerid_lookup, bwar_bat
 from pybaseball.statcast_fielding import statcast_outs_above_average
 from st_aggrid import (
@@ -132,7 +134,6 @@ title_col, meta_col = st.columns([3, 1])
 with title_col:
     st.title("Custom Player Comparison")
 with meta_col:
-    loading_placeholder = st.empty()
     st.markdown(
         """
         <div style="text-align: right; font-size: 1rem; padding-top: 0.6rem;">
@@ -147,6 +148,7 @@ TRUTHY_STRINGS = {"true", "1", "yes", "y", "t"}
 
 STAT_PRESETS = {
     "Stathead": [
+        "bWAR",
         "WAR",
         "G",
         "PA",
@@ -195,6 +197,8 @@ STAT_PRESETS = {
         "R",
         "K%",
         "BB%",
+        "DRS",
+        "FRV",
     ],
     "Fielding": [
         "DRS",
@@ -226,14 +230,25 @@ STAT_ALLOWLIST = [
     "BABIP", "G", "PA", "AB", "R", "RBI", "HR", "XBH", "H", "2B", "3B", "SB", "BB", "IBB", "SO",
     "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
     "Whiff%", "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
-    "FRV", "OAA", "ARM", "RANGE", "DRS", "FRM", "UZR", "bWAR",
+    "FRV", "OAA", "ARM", "RANGE", "DRS", "TZ", "FRM", "UZR", "bWAR",
 ]
 STATCAST_FIELDING_START_YEAR = 2016
-FIELDING_STATS = ["DRS", "UZR", "FRM", "FRV", "OAA", "ARM", "RANGE", "bWAR"]
+FIELDING_STATS = ["DRS", "TZ", "UZR", "FRM", "FRV", "OAA", "ARM", "RANGE", "bWAR"]
+STAT_DISPLAY_NAMES = {
+    "WAR": "fWAR",
+}
+
+
+def display_stat_name(stat) -> str:
+    if stat is None:
+        return ""
+    text = str(stat)
+    return STAT_DISPLAY_NAMES.get(text, text)
 SUM_STATS = {
     "G", "PA", "AB", "R", "H", "1B", "2B", "3B", "HR", "RBI", "SB", "CS",
     "BB", "IBB", "SO", "HBP", "SF", "SH", "XBH", "TB",
     "WAR", "Off", "Def", "BsR", "ISO", "GDP", "wRAA", "wRC",
+    "TZ",
 }
 RATE_STATS = {
     "AVG", "OBP", "SLG", "OPS", "wOBA", "xwOBA", "xBA", "xSLG", "BABIP",
@@ -266,6 +281,14 @@ HEADSHOT_PLACEHOLDER = (
     "NSAyNS01NSA1NXMzNSAxNS41IDU1IDE1LjUgNTUtMTUuNSA1NS0xNS41LTM1LTU1LTU1LTU1eicgZmlsbD0nI2Nj"
     "YycvPgo8L3N2Zz4="
 )
+LOCAL_BWAR_FILE = Path(__file__).with_name("warhitters2025.txt")
+
+
+def local_bwar_signature() -> float:
+    try:
+        return LOCAL_BWAR_FILE.stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
 
 
 @st.cache_data(show_spinner=False, ttl=900)
@@ -477,22 +500,72 @@ def load_savant_oaa_year(year: int) -> pd.DataFrame:
     return df[["NameKey", "Name", "OAA"]]
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def load_bwar_dataset() -> pd.DataFrame:
+def load_local_bwar_data() -> pd.DataFrame:
+    path = LOCAL_BWAR_FILE
+    if not path.exists():
+        return pd.DataFrame()
     try:
-        data = bwar_bat(return_all=False)
+        df = pd.read_csv(path)
     except Exception:
         return pd.DataFrame()
-    if data is None or data.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
-    data = data.copy()
-    data["year_ID"] = pd.to_numeric(data.get("year_ID"), errors="coerce")
-    data["WAR"] = pd.to_numeric(data.get("WAR"), errors="coerce")
-    if "pitcher" in data.columns:
-        data = data[pd.to_numeric(data["pitcher"], errors="coerce").fillna(1) == 0]
-    data["Name"] = data["name_common"].astype(str).str.strip()
-    data["NameKey"] = data["Name"].apply(normalize_statcast_name)
-    return data[["NameKey", "Name", "year_ID", "WAR"]]
+    df = df.copy()
+    pitcher_col = df.get("pitcher")
+    if pitcher_col is not None:
+        pitcher_mask = (
+            pitcher_col.astype(str)
+            .str.strip()
+            .str.upper()
+            .isin({"Y", "1", "TRUE"})
+        )
+        df = df[~pitcher_mask]
+    df["Name"] = df.get("name_common", df.get("Name", "")).astype(str).str.strip()
+    df["NameKey"] = df["Name"].apply(normalize_statcast_name)
+    df["year_ID"] = pd.to_numeric(df.get("year_ID"), errors="coerce")
+    df["WAR"] = pd.to_numeric(df.get("WAR"), errors="coerce")
+    player_series = df["player_ID"] if "player_ID" in df.columns else pd.Series("", index=df.index)
+    df["player_ID"] = player_series.astype(str).str.strip().str.lower()
+    mlb_series = df["mlb_ID"] if "mlb_ID" in df.columns else pd.Series(np.nan, index=df.index)
+    df["mlb_ID"] = pd.to_numeric(mlb_series, errors="coerce")
+    df = df.dropna(subset=["NameKey", "year_ID", "WAR"])
+    return df[["NameKey", "Name", "year_ID", "WAR", "player_ID", "mlb_ID"]]
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def load_bwar_dataset(local_sig: float) -> pd.DataFrame:
+    _ = local_sig  # cache key
+    frames: list[pd.DataFrame] = []
+    try:
+        data = bwar_bat(return_all=True)
+    except Exception:
+        data = None
+    if data is not None and not data.empty:
+        data = data.copy()
+        data["year_ID"] = pd.to_numeric(data.get("year_ID"), errors="coerce")
+        data["WAR"] = pd.to_numeric(data.get("WAR"), errors="coerce")
+        if "pitcher" in data.columns:
+            data = data[pd.to_numeric(data["pitcher"], errors="coerce").fillna(1) == 0]
+        data["Name"] = data["name_common"].astype(str).str.strip()
+        data["NameKey"] = data["Name"].apply(normalize_statcast_name)
+        player_series = data["player_ID"] if "player_ID" in data.columns else pd.Series("", index=data.index)
+        data["player_ID"] = player_series.astype(str).str.strip().str.lower()
+        mlb_series = data["mlb_ID"] if "mlb_ID" in data.columns else pd.Series(np.nan, index=data.index)
+        data["mlb_ID"] = pd.to_numeric(mlb_series, errors="coerce")
+        frames.append(data[["NameKey", "Name", "year_ID", "WAR", "player_ID", "mlb_ID"]])
+
+    local = load_local_bwar_data()
+    if local is not None and not local.empty:
+        frames.append(local)
+
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.dropna(subset=["NameKey", "year_ID", "WAR"])
+    combined = combined.sort_values(["NameKey", "year_ID"])
+    combined = combined.drop_duplicates(subset=["NameKey", "year_ID"], keep="last")
+    return combined.reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False, ttl=900)
@@ -500,19 +573,57 @@ def load_bwar_span(
     start_year: int,
     end_year: int,
     target_names: tuple[str, ...] | None = None,
+    target_bbref: str | None = None,
+    target_mlbam: int | None = None,
 ) -> pd.DataFrame:
-    data = load_bwar_dataset()
+    data = load_bwar_dataset(local_bwar_signature())
     if data is None or data.empty:
         return pd.DataFrame()
     mask = data["year_ID"].between(start_year, end_year)
-    df = data[mask]
+    pool = data[mask]
+    if pool.empty:
+        return pd.DataFrame()
+
+    def match_by_names() -> pd.DataFrame:
+        if not target_names:
+            return pd.DataFrame()
+        keys = {normalize_statcast_name(name) for name in target_names if name}
+        if not keys:
+            return pd.DataFrame()
+        return pool[pool["NameKey"].isin(keys)]
+
+    def match_by_bbref() -> pd.DataFrame:
+        if not target_bbref:
+            return pd.DataFrame()
+        slug = str(target_bbref).strip().lower()
+        if not slug:
+            return pd.DataFrame()
+        if "player_ID" not in pool.columns:
+            return pd.DataFrame()
+        return pool[pool["player_ID"].astype(str).str.lower() == slug]
+
+    def match_by_mlbam() -> pd.DataFrame:
+        if target_mlbam is None:
+            return pd.DataFrame()
+        try:
+            mlbam_val = int(target_mlbam)
+        except Exception:
+            return pd.DataFrame()
+        if "mlb_ID" not in pool.columns:
+            return pd.DataFrame()
+        return pool[pool["mlb_ID"] == mlbam_val]
+
+    df = match_by_names()
+    if df.empty:
+        alt = match_by_bbref()
+        if not alt.empty:
+            df = alt
+    if df.empty:
+        alt = match_by_mlbam()
+        if not alt.empty:
+            df = alt
     if df.empty:
         return pd.DataFrame()
-    if target_names:
-        keys = {normalize_statcast_name(name) for name in target_names if name}
-        df = df[df["NameKey"].isin(keys)]
-        if df.empty:
-            return pd.DataFrame()
     agg = df.groupby("NameKey", as_index=False).agg({
         "Name": "first",
         "WAR": lambda s: s.sum(min_count=1),
@@ -632,7 +743,7 @@ def load_player_fielding_profile(fg_id: int, start_year: int, end_year: int) -> 
             return {}
         df = pd.concat(frames, ignore_index=True)
     result: dict[str, float] = {}
-    for key in ["DRS", "UZR", "FRM"]:
+    for key in ["DRS", "TZ", "UZR", "FRM"]:
         if key in df.columns:
             series = pd.to_numeric(df[key], errors="coerce")
             if not series.isna().all():
@@ -647,6 +758,11 @@ def build_player_profile(fg_id: int, start_year: int, end_year: int) -> pd.Serie
     fielding = load_player_fielding_profile(fg_id, start_year, end_year)
     for key, val in fielding.items():
         batting[key] = val
+    name_value = str(batting.get("Name", "")).strip()
+    mlbam_id = None
+    bbref_id = None
+    if name_value:
+        mlbam_id, bbref_id = lookup_mlbam_id(name_value, return_bbref=True)
     name_key = normalize_statcast_name(str(batting.get("Name", "")))
     if name_key:
         statcast = load_statcast_fielding_span(start_year, end_year, target_names=(name_key,))
@@ -656,11 +772,21 @@ def build_player_profile(fg_id: int, start_year: int, end_year: int) -> pd.Serie
                 for metric in ["FRV", "OAA", "ARM", "RANGE"]:
                     value = pd.to_numeric(match[metric].iloc[0], errors="coerce") if metric in match.columns else np.nan
                     batting[metric] = value
-        bwar = load_bwar_span(start_year, end_year, target_names=(name_key,))
-        if bwar is not None and not bwar.empty:
-            match_bwar = bwar[bwar["NameKey"] == name_key]
-            if not match_bwar.empty:
-                batting["bWAR"] = pd.to_numeric(match_bwar["bWAR"].iloc[0], errors="coerce")
+    name_targets = (name_key,) if name_key else None
+    bwar = load_bwar_span(
+        start_year,
+        end_year,
+        target_names=name_targets,
+        target_bbref=bbref_id,
+        target_mlbam=mlbam_id,
+    )
+    if bwar is not None and not bwar.empty:
+        match_bwar = bwar
+        if name_key:
+            match = bwar[bwar["NameKey"] == name_key]
+            if not match.empty:
+                match_bwar = match
+        batting["bWAR"] = pd.to_numeric(match_bwar["bWAR"].iloc[0], errors="coerce")
     for metric in FIELDING_STATS:
         if metric not in batting.index:
             batting[metric] = np.nan
@@ -673,7 +799,7 @@ def build_player_profile(fg_id: int, start_year: int, end_year: int) -> pd.Serie
 def lookup_fg_id_by_name(full_name: str) -> int | None:
     if not full_name or not isinstance(full_name, str):
         return None
-    tokens = full_name.strip().replace(".", "").split()
+    tokens = full_name.strip().split()
     suffixes = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "v"}
     while tokens and tokens[-1].lower() in suffixes:
         tokens.pop()
@@ -681,20 +807,45 @@ def lookup_fg_id_by_name(full_name: str) -> int | None:
         return None
     last = tokens[-1]
     first = " ".join(tokens[:-1])
-    try:
-        lookup = playerid_lookup(last, first)
-    except Exception:
-        return None
-    if lookup is None or lookup.empty or "key_fangraphs" not in lookup.columns:
-        return None
-    val = lookup["key_fangraphs"].dropna()
-    if val.empty:
-        return None
-    fg_id = int(val.iloc[0])
-    return fg_id if fg_id > 0 else None
+
+    def normalize_token(val: str) -> str:
+        val = val.replace(".", "").strip()
+        try:
+            return unicodedata.normalize("NFKD", val).encode("ascii", "ignore").decode()
+        except Exception:
+            return val
+
+    variants = [
+        (last, first),
+        (normalize_token(last), normalize_token(first)),
+        (normalize_token(last).lower(), normalize_token(first).lower()),
+        (last.lower(), first.lower()),
+    ]
+    seen: set[tuple[str, str]] = set()
+    for last_variant, first_variant in variants:
+        key = (last_variant, first_variant)
+        if not last_variant or not first_variant or key in seen:
+            continue
+        seen.add(key)
+        try:
+            lookup = playerid_lookup(last_variant, first_variant)
+        except Exception:
+            continue
+        if lookup is None or lookup.empty or "key_fangraphs" not in lookup.columns:
+            continue
+        val = lookup["key_fangraphs"].dropna()
+        if val.empty:
+            continue
+        try:
+            fg_id = int(val.iloc[0])
+        except Exception:
+            continue
+        if fg_id > 0:
+            return fg_id
+    return None
 
 
-def resolve_player_fg_id(name: str, pool_df: pd.DataFrame | None) -> int | None:
+def resolve_player_fg_id(name: str, pool_df: pd.DataFrame | None = None) -> int | None:
     if pool_df is not None and not pool_df.empty and "IDfg" in pool_df.columns:
         ids = pool_df.loc[pool_df["Name"] == name, "IDfg"].dropna().astype(int)
         if not ids.empty:
@@ -1053,8 +1204,6 @@ with left_col:
     stat_builder_container = st.container()
 
 # --------------------- Controls ---------------------
-min_pa_key = "comp_min_pa_input"
-min_pa_default = 500
 current_year = date.today().year
 years_desc = list(range(current_year, 1870, -1))
 single_a_key = "comp_single_year_a"
@@ -1062,40 +1211,6 @@ single_b_key = "comp_single_year_b"
 single_year_a_key = "comp_year_a_single"
 single_year_b_key = "comp_year_b_single"
 with controls_container:
-    def span_len(is_single: bool, start_key: str, end_key: str, single_key: str) -> int:
-        if is_single:
-            year_val = st.session_state.get(single_key, current_year)
-            return 1 if year_val else 1
-        start_val = st.session_state.get(start_key, current_year)
-        end_val = st.session_state.get(end_key, current_year)
-        try:
-            start_int = int(start_val)
-            end_int = int(end_val)
-        except Exception:
-            return 1
-        return abs(end_int - start_int) + 1
-
-    span_a_guess = span_len(
-        st.session_state.get(single_a_key, True),
-        "comp_year_a_start",
-        "comp_year_a_end",
-        single_year_a_key,
-    )
-    span_b_guess = span_len(
-        st.session_state.get(single_b_key, True),
-        "comp_year_b_start",
-        "comp_year_b_end",
-        single_year_b_key,
-    )
-    dynamic_min_pa_default = max(span_a_guess, span_b_guess, 1) * 300 if max(span_a_guess, span_b_guess, 1) > 1 else min_pa_default
-
-    min_pa = st.number_input(
-        "Minimum PA (for player list)",
-        0,
-        20000,
-        st.session_state.get(min_pa_key, dynamic_min_pa_default),
-        key=min_pa_key,
-    )
     year_col = st.columns(2)
     with year_col[0]:
         single_a = st.checkbox(
@@ -1158,93 +1273,102 @@ range_a = (min(year_a_start, year_a_end), max(year_a_start, year_a_end))
 range_b = (min(year_b_start, year_b_end), max(year_b_start, year_b_end))
 
 
-def prep_df(start_year: int, end_year: int) -> pd.DataFrame:
-    frame = load_batting(start_year, end_year).copy()
-    if frame is None or frame.empty:
-        return frame
-    subset_cols = ["IDfg", "Name", "Team", "PA"]
-    missing = [col for col in subset_cols if col not in frame.columns]
-    if missing:
-        st.error("Required columns missing from batting data.")
-        return pd.DataFrame()
-    result = frame[subset_cols].copy()
-    result["PA"] = pd.to_numeric(result["PA"], errors="coerce")
-    result["Team"] = result["Team"].astype(str).str.upper()
-    result["Name"] = result["Name"].astype(str).str.strip()
-    result["TeamDisplay"] = result["Team"].apply(lambda t: compute_team_display([t]))
-    return result
-
-
-with loading_placeholder.container():
-    with st.spinner("Loading player data..."):
-        pool_df_a = prep_df(*range_a)
-        pool_df_b = prep_df(*range_b)
-loading_placeholder.empty()
-
-if pool_df_a is None or pool_df_a.empty or pool_df_b is None or pool_df_b.empty:
-    st.error("No data returned from pybaseball for one of the seasons.")
-    st.stop()
-
-def eligible_players(df: pd.DataFrame) -> pd.DataFrame:
-    eligible = df[df["PA"] >= min_pa].copy()
-    return eligible if not eligible.empty else df.copy()
-
-def ensure_selection_present(options: list[str], pool: pd.DataFrame, state_key: str) -> list[str]:
-    selected = st.session_state.get(state_key)
-    if not selected or selected in options or pool is None or pool.empty:
-        return options
-    available = pool["Name"].astype(str).tolist()
-    if selected in available:
-        return [selected] + options
-    return options
-
-eligible_a = eligible_players(pool_df_a)
-eligible_b = eligible_players(pool_df_b)
-
-player_options_a = (
-    eligible_a.sort_values(["Name", "PA"], ascending=[True, False])
-    .drop_duplicates(subset=["Name"], keep="first")
-    .sort_values("Name")["Name"]
-    .tolist()
-)
-player_options_a = ensure_selection_present(player_options_a, pool_df_a, "comp_player_a")
-player_options_b = (
-    eligible_b.sort_values(["Name", "PA"], ascending=[True, False])
-    .drop_duplicates(subset=["Name"], keep="first")
-    .sort_values("Name")["Name"]
-    .tolist()
-)
-player_options_b = ensure_selection_present(player_options_b, pool_df_b, "comp_player_b")
-
-if not player_options_a or not player_options_b:
-    st.error("No players available to display.")
-    st.stop()
-
-# Ensure session state is initialized and selections remain stable
+DEFAULT_PLAYER_A = "Mookie Betts"
+DEFAULT_PLAYER_B = "Aaron Judge"
 if "comp_player_a" not in st.session_state:
-    st.session_state["comp_player_a"] = player_options_a[0]
-elif st.session_state["comp_player_a"] not in player_options_a:
-    st.session_state["comp_player_a"] = player_options_a[0]
-
+    st.session_state["comp_player_a"] = DEFAULT_PLAYER_A
 if "comp_player_b" not in st.session_state:
-    st.session_state["comp_player_b"] = player_options_b[1] if len(player_options_b) > 1 else player_options_b[0]
-elif st.session_state["comp_player_b"] not in player_options_b:
-    st.session_state["comp_player_b"] = player_options_b[1] if len(player_options_b) > 1 else player_options_b[0]
+    st.session_state["comp_player_b"] = DEFAULT_PLAYER_B
+if "comp_player_a_id" not in st.session_state:
+    st.session_state["comp_player_a_id"] = ""
+if "comp_player_b_id" not in st.session_state:
+    st.session_state["comp_player_b_id"] = ""
 
 with controls_container:
     sel_a_col, sel_b_col = st.columns(2)
     with sel_a_col:
-        player_a = st.selectbox("Player A", player_options_a, key="comp_player_a")
+        player_a_mode = st.selectbox(
+            "Player A Input",
+            ["Name", "FanGraphs ID"],
+            key="comp_player_a_mode",
+        )
+        if player_a_mode == "Name":
+            player_a_name_input = st.text_input("Player A", key="comp_player_a")
+            player_a_id_input = st.session_state.get("comp_player_a_id", "")
+        else:
+            player_a_id_input = st.text_input("Player A FanGraphs ID", key="comp_player_a_id")
+            player_a_name_input = st.session_state.get("comp_player_a", "")
     with sel_b_col:
-        player_b = st.selectbox("Player B", player_options_b, key="comp_player_b")
+        player_b_mode = st.selectbox(
+            "Player B Input",
+            ["Name", "FanGraphs ID"],
+            key="comp_player_b_mode",
+        )
+        if player_b_mode == "Name":
+            player_b_name_input = st.text_input("Player B", key="comp_player_b")
+            player_b_id_input = st.session_state.get("comp_player_b_id", "")
+        else:
+            player_b_id_input = st.text_input("Player B FanGraphs ID", key="comp_player_b_id")
+            player_b_name_input = st.session_state.get("comp_player_b", "")
 
-player_a_fg_id = resolve_player_fg_id(player_a, pool_df_a)
-player_b_fg_id = resolve_player_fg_id(player_b, pool_df_b)
-player_a_row = build_player_profile(player_a_fg_id, *range_a) if player_a_fg_id else None
-player_b_row = build_player_profile(player_b_fg_id, *range_b) if player_b_fg_id else None
+player_a_name = player_a_name_input.strip()
+player_b_name = player_b_name_input.strip()
+player_a_id_raw = str(player_a_id_input).strip()
+player_b_id_raw = str(player_b_id_input).strip()
+
+if player_a_mode == "Name":
+    if not player_a_name:
+        st.warning("Enter a name for Player A or switch to FanGraphs ID input.")
+        st.stop()
+    player_a_fg_id = resolve_player_fg_id(player_a_name)
+else:
+    if not player_a_id_raw:
+        st.warning("Enter a FanGraphs ID for Player A or switch to name input.")
+        st.stop()
+    try:
+        player_a_fg_id = int(player_a_id_raw)
+    except Exception:
+        player_a_fg_id = None
+
+if player_b_mode == "Name":
+    if not player_b_name:
+        st.warning("Enter a name for Player B or switch to FanGraphs ID input.")
+        st.stop()
+    player_b_fg_id = resolve_player_fg_id(player_b_name)
+else:
+    if not player_b_id_raw:
+        st.warning("Enter a FanGraphs ID for Player B or switch to name input.")
+        st.stop()
+    try:
+        player_b_fg_id = int(player_b_id_raw)
+    except Exception:
+        player_b_fg_id = None
+
+if not player_a_fg_id or player_a_fg_id <= 0:
+    if player_a_mode == "Name":
+        st.error(f"Could not resolve FanGraphs ID for {player_a_name}. Check the spelling or use the ID input.")
+    else:
+        st.error("Player A FanGraphs ID must be a positive integer.")
+    st.stop()
+if not player_b_fg_id or player_b_fg_id <= 0:
+    if player_b_mode == "Name":
+        st.error(f"Could not resolve FanGraphs ID for {player_b_name}. Check the spelling or use the ID input.")
+    else:
+        st.error("Player B FanGraphs ID must be a positive integer.")
+    st.stop()
+
+player_a_row = build_player_profile(player_a_fg_id, *range_a)
+player_b_row = build_player_profile(player_b_fg_id, *range_b)
 if player_a_row is None or player_b_row is None:
     st.error("Could not load data for one of the selected players.")
     st.stop()
+
+player_a_display_name = str(player_a_row.get("Name", "")).strip()
+if not player_a_display_name:
+    player_a_display_name = player_a_name if player_a_mode == "Name" else f"FG#{player_a_fg_id}"
+player_b_display_name = str(player_b_row.get("Name", "")).strip()
+if not player_b_display_name:
+    player_b_display_name = player_b_name if player_b_mode == "Name" else f"FG#{player_b_fg_id}"
 
 df_a = pd.DataFrame([player_a_row])
 df_b = pd.DataFrame([player_b_row])
@@ -1257,15 +1381,15 @@ player_a_team = player_a_row.get("TeamDisplay", normalize_display_team(player_a_
 player_b_team = player_b_row.get("TeamDisplay", normalize_display_team(player_b_row.get("Team", "")))
 year_a_label = f"{range_a[0]}" if range_a[0] == range_a[1] else f"{range_a[0]}-{range_a[1]}"
 year_b_label = f"{range_b[0]}" if range_b[0] == range_b[1] else f"{range_b[0]}-{range_b[1]}"
-player_a_col_label = player_a
-player_b_col_label = player_b
+player_a_col_label = player_a_display_name
+player_b_col_label = player_b_display_name
 if player_a_col_label == player_b_col_label:
     if year_a_label != year_b_label:
-        player_a_col_label = f"{player_a} ({year_a_label})"
-        player_b_col_label = f"{player_b} ({year_b_label})"
+        player_a_col_label = f"{player_a_display_name} ({year_a_label})"
+        player_b_col_label = f"{player_b_display_name} ({year_b_label})"
     else:
-        player_a_col_label = f"{player_a} (Player A)"
-        player_b_col_label = f"{player_b} (Player B)"
+        player_a_col_label = f"{player_a_display_name} (Player A)"
+        player_b_col_label = f"{player_b_display_name} (Player B)"
 
 # --------------------- Stat builder setup ---------------------
 stat_exclusions = {"Season"}
@@ -1479,6 +1603,7 @@ with stat_builder_container:
             "Add stat",
             add_options,
             label_visibility="hidden",
+            format_func=display_stat_name,
             key=add_select_key,
             on_change=add_stat_callback,
             args=(stat_state_key, add_select_key, add_reset_key, sentinel_add),
@@ -1489,6 +1614,7 @@ with stat_builder_container:
             "Remove stat",
             remove_options,
             label_visibility="hidden",
+            format_func=display_stat_name,
             key=remove_select_key,
             on_change=remove_stat_callback,
             args=(stat_state_key, remove_select_key, remove_reset_key, sentinel_remove),
@@ -1512,6 +1638,20 @@ with stat_builder_container:
         else bool(val)
     )
     stat_config_df.insert(0, "Drag", ["↕"] * len(stat_config_df))
+
+    display_map_json = json.dumps(STAT_DISPLAY_NAMES)
+    stat_value_formatter = JsCode(
+        f"""
+        function(params) {{
+            const map = {display_map_json};
+            const value = params.value;
+            if (value === undefined || value === null) {{
+                return '';
+            }}
+            return map[value] || value;
+        }}
+        """
+    )
 
     gb = GridOptionsBuilder.from_dataframe(stat_config_df)
     gb.configure_default_column(
@@ -1554,6 +1694,7 @@ with stat_builder_container:
         cellEditor="agSelectCellEditor",
         cellEditorParams={"values": allowed_add_stats or stat_options},
         flex=1,
+        valueFormatter=stat_value_formatter,
     )
 
     grid_options = gb.build()
@@ -1693,8 +1834,8 @@ for stat in stats_order:
 
 table_df = pd.DataFrame(comparison_rows)
 
-headshot_a = get_headshot_url(player_a, df_a)
-headshot_b = get_headshot_url(player_b, df_b)
+headshot_a = get_headshot_url(player_a_display_name, df_a)
+headshot_b = get_headshot_url(player_b_display_name, df_b)
 esc = html.escape
 
 with right_col:
@@ -1711,12 +1852,12 @@ with right_col:
             "    <div class=\"headshot-col\">",
             f"      <div class=\"player-meta\">{esc(str(year_a_label))} | {esc(str(player_a_team))}</div>",
             f"      {img_a}",
-            f"      <div class=\"player-name\">{esc(player_a)}</div>",
+            f"      <div class=\"player-name\">{esc(player_a_display_name)}</div>",
             "    </div>",
             "    <div class=\"headshot-col\">",
             f"      <div class=\"player-meta\">{esc(str(year_b_label))} | {esc(str(player_b_team))}</div>",
             f"      {img_b}",
-            f"      <div class=\"player-name\">{esc(player_b)}</div>",
+            f"      <div class=\"player-name\">{esc(player_b_display_name)}</div>",
             "    </div>",
             "  </div>",
             "  <table class=\"compare-table\">",
@@ -1753,6 +1894,8 @@ with right_col:
         ])
         rows_html = "\n".join(rows)
         st.markdown(rows_html, unsafe_allow_html=True)
-        st.caption("Note: PDF Export wasn't working well so screenshot to save.")
-        st.caption("Note: Rookies with accents, dots, or suffixes in their name may not work (no player ID, unable to search by name)")
-        st.caption("Note: Spanning multiple years drastically increases load times... be patient")
+        st.caption("PDF Export wasn't working, so screenshot to save.")
+        st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
+        st.caption("TZ records ended in 2001, DRS started in 2002")
+        st.caption("Rookies with accents, initials, etc. may not return a headshot")
+       
