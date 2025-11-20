@@ -36,6 +36,12 @@ def safe_aggrid(df, **kwargs):
         def __bool__(self):
             return True
 
+    grid_opts = kwargs.get("gridOptions")
+    if isinstance(grid_opts, dict) and "rowData" in grid_opts:
+        clean_grid_opts = dict(grid_opts)
+        clean_grid_opts.pop("rowData", None)
+        kwargs = {**kwargs, "gridOptions": clean_grid_opts}
+
     data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
     for attempt in range(3):
         try:
