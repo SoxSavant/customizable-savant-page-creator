@@ -20,7 +20,7 @@ steps:
     args: [
       "run",
       "deploy",
-      "teamapp",
+      "playerapp",
       "--image",
       "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest",
       "--region",
