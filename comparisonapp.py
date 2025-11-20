@@ -27,16 +27,24 @@ import requests
 def safe_aggrid(df, **kwargs):
     """
     Retries AG Grid loading up to 3 times to avoid Streamlit component
-    handshake failures in production environments like Cloud Run.
+    handshake failures in production environments like Cloud Run, and
+    avoids double-supplying data (both `data` arg and gridOptions.rowData).
     """
     class _DFProxy(pd.DataFrame):
         @property
         def _constructor(self):
             return _DFProxy
         def __bool__(self):
+            # Always truthy so Streamlit doesn't treat empty dataframes as False
             return True
 
-    data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
+    # If gridOptions already has rowData, don't also pass df as the data argument.
+    grid_opts = kwargs.get("gridOptions")
+    if isinstance(grid_opts, dict) and "rowData" in grid_opts:
+        data_arg = None
+    else:
+        data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
+
     for attempt in range(3):
         try:
             return AgGrid(data_arg, **kwargs)
@@ -44,6 +52,7 @@ def safe_aggrid(df, **kwargs):
             if attempt == 2:
                 raise  # rethrow after last attempt
             time.sleep(0.3)
+
 
 
 GRID_THEME = "balham"
