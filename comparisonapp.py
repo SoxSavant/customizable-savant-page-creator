@@ -1723,6 +1723,7 @@ with stat_builder_container:
     )
 
     gb = GridOptionsBuilder.from_dataframe(stat_config_df)
+    gb.configure_grid_options(rowData=None)
     gb.configure_default_column(
         editable=True,
         filter=False,

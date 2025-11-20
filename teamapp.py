@@ -826,6 +826,7 @@ with stat_builder_container:
     stat_config_df.insert(0, "Drag", ["↕"] * len(stat_config_df))
 
     gb = GridOptionsBuilder.from_dataframe(stat_config_df)
+    gb.configure_grid_options(rowData=None)
     gb.configure_default_column(
         editable=True,
         filter=False,
