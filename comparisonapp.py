@@ -1,3 +1,5 @@
+import os
+import time
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,19 +8,12 @@ import html
 import io
 import unicodedata
 import re
-import json
 from datetime import date
 from pathlib import Path
 from pybaseball import batting_stats, fielding_stats, playerid_lookup, bwar_bat
 from pybaseball.statcast_fielding import statcast_outs_above_average
-from st_aggrid import (
-    AgGrid,
-    GridOptionsBuilder,
-    GridUpdateMode,
-    DataReturnMode,
-    JsCode,
-)
 import requests
+
 
 st.set_page_config(page_title="Player Comparison App", layout="wide")
 
@@ -584,6 +579,13 @@ def load_bwar_span(
     if pool.empty:
         return pd.DataFrame()
 
+    def clean_key(val: str) -> str:
+        try:
+            val = unicodedata.normalize("NFKD", val).encode("ascii", "ignore").decode()
+        except Exception:
+            pass
+        return "".join(ch for ch in str(val) if ch.isalnum()).lower()
+
     def match_by_names() -> pd.DataFrame:
         if not target_names:
             return pd.DataFrame()
@@ -591,6 +593,16 @@ def load_bwar_span(
         if not keys:
             return pd.DataFrame()
         return pool[pool["NameKey"].isin(keys)]
+
+    def match_by_clean_name() -> pd.DataFrame:
+        if not target_names:
+            return pd.DataFrame()
+        targets = {clean_key(name) for name in target_names if name}
+        if not targets:
+            return pd.DataFrame()
+        pool_local = pool.copy()
+        pool_local["__clean"] = pool_local["Name"].astype(str).apply(clean_key)
+        return pool_local[pool_local["__clean"].isin(targets)]
 
     def match_by_bbref() -> pd.DataFrame:
         if not target_bbref:
@@ -620,6 +632,10 @@ def load_bwar_span(
             df = alt
     if df.empty:
         alt = match_by_mlbam()
+        if not alt.empty:
+            df = alt
+    if df.empty:
+        alt = match_by_clean_name()
         if not alt.empty:
             df = alt
     if df.empty:
@@ -1417,38 +1433,6 @@ add_reset_key = "comp_reset_add_select"
 remove_reset_key = "comp_reset_remove_select"
 stat_version_key = "comp_stat_config_version"
 
-# --- AG Grid Checkbox Renderer JS ---
-show_checkbox_renderer = JsCode(
-    """
-    class ShowCheckboxRenderer {
-        init(params) {
-            this.params = params;
-            this.eGui = document.createElement('div');
-            this.eGui.style.display = 'flex';
-            this.eGui.style.justifyContent = 'center';
-            this.eGui.style.alignItems = 'center';
-            this.eGui.style.height = '100%';
-            this.eGui.style.width = '100%';
-            this.checkbox = document.createElement('input');
-            this.checkbox.type = 'checkbox';
-            this.checkbox.checked = Boolean(params.value);
-            this.checkbox.addEventListener('change', () => {
-                params.node.setDataValue(params.column.colId, this.checkbox.checked);
-            });
-            this.eGui.appendChild(this.checkbox);
-        }
-        getGui() {
-            return this.eGui;
-        }
-        refresh(params) {
-            this.checkbox.checked = Boolean(params.value);
-            return true;
-        }
-    }
-    """
-)
-# --- End AG Grid Checkbox Renderer JS ---
-
 
 def bump_stat_config_version():
     st.session_state[stat_version_key] = st.session_state.get(stat_version_key, 0) + 1
@@ -1533,6 +1517,27 @@ def normalize_stat_rows(rows, fallback):
     if not cleaned:
         cleaned = [row.copy() for row in fallback]
     return cleaned
+
+
+def move_stat_row(delta: int, index: int, fallback):
+    """Move a stat row up/down and persist."""
+    rows = normalize_stat_rows(st.session_state.get(stat_state_key, fallback), fallback)
+    target = index + delta
+    if 0 <= target < len(rows):
+        rows[index], rows[target] = rows[target], rows[index]
+        st.session_state[stat_state_key] = rows
+        bump_stat_config_version()
+        st.session_state[manual_stat_update_key] = True
+
+
+def toggle_stat_show(index: int, state_key: str, fallback):
+    """Toggle the Show flag for a row and persist."""
+    rows = normalize_stat_rows(st.session_state.get(stat_state_key, fallback), fallback)
+    if 0 <= index < len(rows):
+        rows[index]["Show"] = bool(st.session_state.get(state_key, True))
+        st.session_state[stat_state_key] = rows
+        bump_stat_config_version()
+        st.session_state[manual_stat_update_key] = True
 
 
 # Initialize state once
@@ -1622,133 +1627,56 @@ with stat_builder_container:
 
     current_stat_config = normalize_stat_rows(st.session_state.get(stat_state_key, preset_base_config), preset_base_config)
 
-    stat_config_df = pd.DataFrame(current_stat_config)
-    if stat_config_df.empty:
-        stat_config_df = pd.DataFrame(preset_base_config)
-    if "Show" not in stat_config_df.columns:
-        stat_config_df["Show"] = True
-    if "Stat" not in stat_config_df.columns:
-        stat_config_df["Stat"] = preset_base_config[0]["Stat"]
-    stat_config_df = stat_config_df[["Show", "Stat"]].copy()
-    stat_config_df["Show"] = stat_config_df["Show"].apply(
-        lambda val: True
-        if pd.isna(val)
-        else val.strip().lower() in TRUTHY_STRINGS
-        if isinstance(val, str)
-        else bool(val)
-    )
-    stat_config_df.insert(0, "Drag", ["↕"] * len(stat_config_df))
+    st.markdown("#### Order & visibility")
 
-    display_map_json = json.dumps(STAT_DISPLAY_NAMES)
-    stat_value_formatter = JsCode(
-        f"""
-        function(params) {{
-            const map = {display_map_json};
-            const value = params.value;
-            if (value === undefined || value === null) {{
-                return '';
-            }}
-            return map[value] || value;
-        }}
-        """
-    )
+    st.markdown('<div class="stat-table">', unsafe_allow_html=True)
+    st.markdown('<div class="table-header">', unsafe_allow_html=True)
+    header_cols = st.columns([0.25, 0.25, 0.25, 0.25])
+    header_cols[0].markdown("**Up**")
+    header_cols[1].markdown("**Down**")
+    header_cols[2].markdown("**Stat**")
+    header_cols[3].markdown("**Show**")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    gb = GridOptionsBuilder.from_dataframe(stat_config_df)
-    gb.configure_default_column(
-        editable=True,
-        filter=False,
-        sortable=False,
-        resizable=True,
-    )
-    gb.configure_selection(selection_mode="disabled", use_checkbox=False)
-    gb.configure_grid_options(
-        rowDragManaged=True,
-        rowDragMultiRow=True,
-        rowDragEntireRow=True,
-        animateRows=True,
-        suppressMovableColumns=True,
-        suppressRowClickSelection=True,
-        singleClickEdit=True,
-        stopEditingWhenCellsLoseFocus=True,
-    )
-    gb.configure_column(
-        "Drag",
-        header_name="",
-        rowDrag=True,
-        editable=False,
-        width=70,
-        suppressMenu=True,
-        suppressSizeToFit=True,
-    )
-    gb.configure_column(
-        "Show",
-        header_name="Show",
-        cellRenderer=show_checkbox_renderer,
-        editable=False,
-        width=100,
-    )
-    gb.configure_column(
-        "Stat",
-        header_name="Stat",
-        editable=True,
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": allowed_add_stats or stat_options},
-        flex=1,
-        valueFormatter=stat_value_formatter,
-    )
+    for idx, row in enumerate(current_stat_config):
+        st.markdown('<div class="table-row">', unsafe_allow_html=True)
+        up_col, down_col, stat_col, show_col = st.columns([0.25, 0.25, 0.25, 0.25])
+        with up_col:
+            st.button(
+                "▲",
+                key=f"stat_up_{idx}",
+                disabled=idx == 0,
+                on_click=move_stat_row,
+                args=(-1, idx, preset_base_config),
+            )
+        with down_col:
+            st.button(
+                "▼",
+                key=f"stat_down_{idx}",
+                disabled=idx == len(current_stat_config) - 1,
+                on_click=move_stat_row,
+                args=(1, idx, preset_base_config),
+            )
+        with stat_col:
+            stat_name = row.get("Stat", "")
+            display_name = STAT_DISPLAY_NAMES.get(stat_name, stat_name)
+            st.write(display_name)
+        with show_col:
+            checkbox_key = f"stat_show_{idx}"
+            st.checkbox(
+                "",
+                value=bool(row.get("Show", True)),
+                key=checkbox_key,
+                label_visibility="collapsed",
+                on_change=toggle_stat_show,
+                args=(idx, checkbox_key, preset_base_config),
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    grid_options = gb.build()
+    cleaned_config = normalize_stat_rows(st.session_state.get(stat_state_key, current_stat_config), preset_base_config)
+    st.session_state[stat_state_key] = cleaned_config
 
-    grid_height = min(480, 90 + len(stat_config_df) * 44)
-    grid_key = f"comp_stat_grid_{st.session_state.get(stat_version_key, 0)}"
-    grid_response = AgGrid(
-        stat_config_df,
-        gridOptions=grid_options,
-        height=grid_height,
-        width="100%",
-        theme="streamlit",
-        data_return_mode=DataReturnMode.AS_INPUT,
-        reload_data=True,
-        fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        allow_unsafe_jscode=True,
-        enable_enterprise_modules=False,
-        key=grid_key,
-        update_on=["rowDragEnd", "cellValueChanged"],
-    )
-
-grid_df = None
-if grid_response and grid_response.data is not None:
-    if isinstance(grid_response.data, pd.DataFrame):
-        grid_df = grid_response.data
-    else:
-        grid_df = pd.DataFrame(grid_response.data)
-    if "Drag" in grid_df.columns:
-        grid_df = grid_df.drop(columns=["Drag"])
-    if "Stat" in grid_df.columns:
-        grid_df = grid_df[grid_df["Stat"].astype(str).str.strip().ne("")]
-    grid_records = grid_df.to_dict("records")
-else:
-    grid_records = []
-
-manual_override = st.session_state.pop(manual_stat_update_key, False)
-current_config_records = [{k: v for k, v in row.items() if k in ["Stat", "Show"]} for row in current_stat_config]
-is_config_identical = (
-    grid_records is not None and
-    len(grid_records) == len(current_config_records) and
-    all(a["Stat"] == b["Stat"] and a["Show"] == b["Show"] for a, b in zip(grid_records, current_config_records))
-)
-
-if manual_override:
-    cleaned_config = current_stat_config.copy()
-elif grid_records and not is_config_identical:
-    cleaned_config = normalize_stat_rows(grid_records, preset_base_config)
-else:
-    cleaned_config = current_stat_config.copy()
-
-st.session_state[stat_state_key] = cleaned_config
-
-stats_order = [row["Stat"] for row in cleaned_config if row.get("Show", True)]
+stats_order = [row["Stat"] for row in st.session_state[stat_state_key] if row.get("Show", True)]
 if not stats_order:
     st.info("Add at least one stat and mark it as shown to build the comparison.")
     st.stop()
@@ -1898,3 +1826,4 @@ with right_col:
         st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
         st.caption("TZ records ended in 2001, DRS started in 2002")
         st.caption("Rookies with accents, initials, etc. may not return a headshot")
+       
