@@ -3,7 +3,7 @@ steps:
     args: [
       "build",
       "-t",
-      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest",
       "-f",
       "Dockerfile.team",
       "."
@@ -12,7 +12,7 @@ steps:
   - name: "gcr.io/cloud-builders/docker"
     args: [
       "push",
-      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest"
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest"
     ]
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
@@ -22,7 +22,7 @@ steps:
       "deploy",
       "teamapp",
       "--image",
-      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest",
+      "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest",
       "--region",
       "us-central1",
       "--allow-unauthenticated",
@@ -33,7 +33,7 @@ steps:
     ]
 
 images:
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/teamapp:latest"
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/player-repo/playerapp:latest"
 
 options:
   logging: CLOUD_LOGGING_ONLY
