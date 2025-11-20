@@ -9,9 +9,12 @@ import matplotlib.image as mpimg
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from pathlib import Path
-from io import BytesIO
+from io import BytesIO, StringIO
+import re
+import requests
 os.environ.setdefault("AGGRID_RELEASE", "True")
 from pybaseball import batting_stats, fielding_stats, bwar_bat
+from pybaseball.statcast_fielding import statcast_outs_above_average
 from datetime import date
 from st_aggrid import (
     AgGrid,
@@ -204,6 +207,7 @@ STAT_ALLOWLIST = [
 ]
 
 FIELDING_COLS = ["DRS", "TZ", "UZR", "FRM"]
+STATCAST_FIELDING_START_YEAR = 2016
 LOCAL_BWAR_FILE = Path(__file__).with_name("warhitters2025.txt")
 
 
@@ -320,6 +324,119 @@ def load_fielding_year(year: int) -> pd.DataFrame:
     agg = df.groupby(["NameKey"], as_index=False)[FIELDING_COLS].sum(min_count=1)
     return agg
 
+
+def reorder_savant_name(raw: str) -> str:
+    if not raw or not isinstance(raw, str):
+        return ""
+    raw = raw.replace("\xa0", " ").strip()
+    if "," in raw:
+        last, first = raw.split(",", 1)
+        return f"{first.strip()} {last.strip()}".strip()
+    return raw
+
+
+def fetch_csv(url: str) -> pd.DataFrame:
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+    except Exception:
+        return pd.DataFrame()
+    try:
+        data = StringIO(resp.content.decode("utf-8"))
+        df = pd.read_csv(data)
+    except Exception:
+        return pd.DataFrame()
+    return df
+
+
+def load_savant_frv_year(year: int) -> pd.DataFrame:
+    url = (
+        "https://baseballsavant.mlb.com/leaderboard/fielding-run-value?"
+        f"gameType=Regular&seasonStart={year}&seasonEnd={year}"
+        "&type=fielder&position=&minInnings=0&minResults=1&csv=true"
+    )
+    df = fetch_csv(url)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.rename(
+        columns={
+            "name": "NameRaw",
+            "total_runs": "FRV",
+            "arm_runs": "ARM",
+            "range_runs": "RANGE",
+        }
+    )
+    df["Name"] = df["NameRaw"].apply(reorder_savant_name)
+    df["NameKey"] = df["Name"].apply(normalize_name_key)
+    for metric in ["FRV", "ARM", "RANGE"]:
+        df[metric] = pd.to_numeric(df.get(metric), errors="coerce")
+    return df[["NameKey", "Name", "FRV", "ARM", "RANGE"]]
+
+
+def load_savant_oaa_year(year: int) -> pd.DataFrame:
+    try:
+        df = statcast_outs_above_average(year, "all")
+    except Exception:
+        return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.copy()
+    name_col = None
+    for col in ["player_name", "last_name, first_name", "name"]:
+        if col in df.columns:
+            name_col = col
+            break
+    if not name_col:
+        return pd.DataFrame()
+    if name_col == "last_name, first_name":
+        df["Name"] = df[name_col].apply(reorder_savant_name)
+    else:
+        df["Name"] = df[name_col].astype(str).str.strip()
+    df["NameKey"] = df["Name"].apply(normalize_name_key)
+    oaa_col = None
+    for col in ["outs_above_average", "oaa"]:
+        if col in df.columns:
+            oaa_col = col
+            break
+    if not oaa_col:
+        return pd.DataFrame()
+    df["OAA"] = pd.to_numeric(df[oaa_col], errors="coerce")
+    return df[["NameKey", "Name", "OAA"]]
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def load_statcast_fielding_year(year: int) -> pd.DataFrame:
+    if year < STATCAST_FIELDING_START_YEAR:
+        return pd.DataFrame()
+    frv = load_savant_frv_year(year)
+    oaa = load_savant_oaa_year(year)
+    if (frv is None or frv.empty) and (oaa is None or oaa.empty):
+        return pd.DataFrame()
+    if frv is None or frv.empty:
+        combined = oaa.copy()
+    elif oaa is None or oaa.empty:
+        combined = frv.copy()
+    else:
+        combined = pd.merge(
+            frv,
+            oaa,
+            on=["NameKey", "Name"],
+            how="outer",
+        )
+    for metric in ["FRV", "OAA", "ARM", "RANGE"]:
+        if metric not in combined.columns:
+            combined[metric] = np.nan
+        else:
+            combined[metric] = pd.to_numeric(combined[metric], errors="coerce")
+    agg = combined.groupby("NameKey", as_index=False).agg({
+        "Name": "first",
+        "FRV": lambda s: s.sum(min_count=1),
+        "OAA": lambda s: s.sum(min_count=1),
+        "ARM": lambda s: s.sum(min_count=1),
+        "RANGE": lambda s: s.sum(min_count=1),
+    })
+    return agg
+
 @st.cache_data(show_spinner=True, ttl=900)
 def load_batting(y: int) -> pd.DataFrame:
     base = batting_stats(y, y, qual=0)
@@ -334,7 +451,13 @@ def load_batting(y: int) -> pd.DataFrame:
     field_df = load_fielding_year(y)
     if field_df is not None and not field_df.empty:
         df = df.merge(field_df, on="NameKey", how="left")
+    statcast_df = load_statcast_fielding_year(y)
+    if statcast_df is not None and not statcast_df.empty:
+        df = df.merge(statcast_df[["NameKey", "FRV", "OAA", "ARM", "RANGE"]], on="NameKey", how="left")
     for col in ["bWAR"] + FIELDING_COLS:
+        if col not in df.columns:
+            df[col] = np.nan
+    for col in ["FRV", "OAA", "ARM", "RANGE"]:
         if col not in df.columns:
             df[col] = np.nan
     return df
@@ -749,7 +872,7 @@ with stat_builder_container:
         data_return_mode=DataReturnMode.AS_INPUT,
         reload_data=True,
         fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
+        update_mode=GridUpdateMode.GRID_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,

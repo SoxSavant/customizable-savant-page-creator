@@ -1772,7 +1772,7 @@ with stat_builder_container:
         data_return_mode=DataReturnMode.AS_INPUT,
         reload_data=True,
         fit_columns_on_grid_load=True,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
+        update_mode=GridUpdateMode.GRID_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,
