@@ -25,11 +25,11 @@ from st_aggrid import (
 )
 
 
-def safe_aggrid(df, **kwargs):
+def safe_aggrid(df, gridOptions=None, **kwargs):
     """
-    Retries AG Grid loading up to 3 times to avoid Streamlit component
-    handshake failures in production environments like Cloud Run.
+    Ensures AG Grid never sees rowData twice and retries handshake failures.
     """
+    # Wrap DF safely
     class _DFProxy(pd.DataFrame):
         @property
         def _constructor(self):
@@ -37,19 +37,29 @@ def safe_aggrid(df, **kwargs):
         def __bool__(self):
             return True
 
-    grid_opts = kwargs.get("gridOptions", {})
-    if "rowData" in grid_opts and grid_opts["rowData"] is not None:
-        grid_opts["rowData"] = None
-    kwargs["gridOptions"] = grid_opts
-
     data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
+
+    # --- CLEAN gridOptions safely ---
+    if gridOptions is not None:
+        gridOptions = dict(gridOptions)         # copy – REQUIRED
+        gridOptions.pop("rowData", None)        # strip rogue rowData
+
+    # retries
     for attempt in range(3):
         try:
-            return AgGrid(data=data_arg, **kwargs)
-        except Exception:
+            return AgGrid(
+                data=data_arg,
+                gridOptions=gridOptions,
+                **kwargs
+            )
+        except ValueError as e:
+            # Only retry handshake, not parse errors
+            if "rowData" not in str(e).lower():
+                raise
             if attempt == 2:
-                raise  # rethrow after last attempt
-            time.sleep(0.3)
+                raise
+            time.sleep(0.25)
+
 
 
 
