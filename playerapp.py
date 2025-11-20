@@ -23,6 +23,32 @@ from st_aggrid import (
 )
 
 
+def safe_aggrid(df, **kwargs):
+    """
+    Retries AG Grid loading and strips rowData to avoid marshal errors.
+    """
+    class _DFProxy(pd.DataFrame):
+        @property
+        def _constructor(self):
+            return _DFProxy
+        def __bool__(self):
+            return True
+
+    grid_opts = kwargs.pop("gridOptions", {}) or {}
+    if "rowData" in grid_opts:
+        grid_opts = dict(grid_opts)
+        grid_opts.pop("rowData", None)
+
+    data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
+    for attempt in range(3):
+        try:
+            return AgGrid(data=data_arg, gridOptions=grid_opts, **kwargs)
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(0.3)
+
+
 
 
 
@@ -829,13 +855,12 @@ with stat_builder_container:
     )
 
     grid_options = gb.build()
-    grid_options.pop("rowData", None)
 
     grid_height = min(480, 90 + len(stat_config_df) * 44)
     grid_key = f"stat_grid_{st.session_state.get(stat_version_key, 0)}"
     time.sleep(0.1)
     
-    grid_response = AgGrid(
+    grid_response = safe_aggrid(
         stat_config_df,
         gridOptions=grid_options,
         height=grid_height,
@@ -844,10 +869,12 @@ with stat_builder_container:
         custom_css=GRID_CUSTOM_CSS,
         data_return_mode=DataReturnMode.AS_INPUT,
         fit_columns_on_grid_load=True,
+        reload_data=True,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
         key=grid_key,
-        update_on=["selectionChanged"],
+        update_on=["rowDragEnd", "cellValueChanged"],
     )
 
 grid_df = None
