@@ -20,33 +20,8 @@ from st_aggrid import (
     GridOptionsBuilder,
     GridUpdateMode,
     DataReturnMode,
+    JsCode,
 )
-
-
-def safe_aggrid(df, **kwargs):
-    """
-    Retries AG Grid loading and strips rowData to avoid marshal errors.
-    """
-    class _DFProxy(pd.DataFrame):
-        @property
-        def _constructor(self):
-            return _DFProxy
-        def __bool__(self):
-            return True
-
-    grid_opts = kwargs.pop("gridOptions", {}) or {}
-    if "rowData" in grid_opts:
-        grid_opts = dict(grid_opts)
-        grid_opts.pop("rowData", None)
-
-    data_arg = _DFProxy(df) if isinstance(df, pd.DataFrame) else df
-    for attempt in range(3):
-        try:
-            return AgGrid(data=data_arg, gridOptions=grid_opts, **kwargs)
-        except Exception:
-            if attempt == 2:
-                raise
-            time.sleep(0.3)
 
 
 
@@ -619,6 +594,38 @@ add_reset_key = "reset_add_select"
 remove_reset_key = "reset_remove_select"
 stat_version_key = "stat_config_version"
 
+# --- AG Grid Checkbox Renderer JS ---
+show_checkbox_renderer = JsCode(
+    """
+    class ShowCheckboxRenderer {
+        init(params) {
+            this.params = params;
+            this.eGui = document.createElement('div');
+            this.eGui.style.display = 'flex';
+            this.eGui.style.justifyContent = 'center';
+            this.eGui.style.alignItems = 'center';
+            this.eGui.style.height = '100%';
+            this.eGui.style.width = '100%';
+            this.checkbox = document.createElement('input');
+            this.checkbox.type = 'checkbox';
+            this.checkbox.checked = Boolean(params.value);
+            this.checkbox.addEventListener('change', () => {
+                params.node.setDataValue(params.column.colId, this.checkbox.checked);
+            });
+            this.eGui.appendChild(this.checkbox);
+        }
+        getGui() {
+            return this.eGui;
+        }
+        refresh(params) {
+            this.checkbox.checked = Boolean(params.value);
+            return true;
+        }
+    }
+    """
+)
+# --- End AG Grid Checkbox Renderer JS ---
+
 # --- Callbacks ---
 def bump_stat_config_version():
     st.session_state[stat_version_key] = st.session_state.get(stat_version_key, 0) + 1
@@ -840,10 +847,9 @@ with stat_builder_container:
     gb.configure_column(
         "Show",
         header_name="Show",
-        editable=True,
-        cellRenderer="agCheckboxCellRenderer",
-        cellEditor="agCheckboxCellEditor",
-        width=110,
+        cellRenderer=show_checkbox_renderer,
+        editable=False,
+        width=100,
     )
     gb.configure_column(
         "Stat",
@@ -860,16 +866,15 @@ with stat_builder_container:
     grid_key = f"stat_grid_{st.session_state.get(stat_version_key, 0)}"
     time.sleep(0.1)
     
-    grid_response = safe_aggrid(
+    grid_response = AgGrid(
         stat_config_df,
         gridOptions=grid_options,
         height=grid_height,
         width="100%",
-        theme=GRID_THEME,
-        custom_css=GRID_CUSTOM_CSS,
+        theme="streamlit",
         data_return_mode=DataReturnMode.AS_INPUT,
-        fit_columns_on_grid_load=True,
         reload_data=True,
+        fit_columns_on_grid_load=True,
         update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         enable_enterprise_modules=False,
