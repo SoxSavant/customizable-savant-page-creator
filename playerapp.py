@@ -20,7 +20,6 @@ from st_aggrid import (
     GridOptionsBuilder,
     GridUpdateMode,
     DataReturnMode,
-    JsCode,
 )
 
 
@@ -594,38 +593,6 @@ add_reset_key = "reset_add_select"
 remove_reset_key = "reset_remove_select"
 stat_version_key = "stat_config_version"
 
-# --- AG Grid Checkbox Renderer JS ---
-show_checkbox_renderer = JsCode(
-    """
-    class ShowCheckboxRenderer {
-        init(params) {
-            this.params = params;
-            this.eGui = document.createElement('div');
-            this.eGui.style.display = 'flex';
-            this.eGui.style.justifyContent = 'center';
-            this.eGui.style.alignItems = 'center';
-            this.eGui.style.height = '100%';
-            this.eGui.style.width = '100%';
-            this.checkbox = document.createElement('input');
-            this.checkbox.type = 'checkbox';
-            this.checkbox.checked = Boolean(params.value);
-            this.checkbox.addEventListener('change', () => {
-                params.node.setDataValue(params.column.colId, this.checkbox.checked);
-            });
-            this.eGui.appendChild(this.checkbox);
-        }
-        getGui() {
-            return this.eGui;
-        }
-        refresh(params) {
-            this.checkbox.checked = Boolean(params.value);
-            return true;
-        }
-    }
-    """
-)
-# --- End AG Grid Checkbox Renderer JS ---
-
 # --- Callbacks ---
 def bump_stat_config_version():
     st.session_state[stat_version_key] = st.session_state.get(stat_version_key, 0) + 1
@@ -847,9 +814,10 @@ with stat_builder_container:
     gb.configure_column(
         "Show",
         header_name="Show",
-        cellRenderer=show_checkbox_renderer,
-        editable=False,
-        width=100,
+        editable=True,
+        cellRenderer="agCheckboxCellRenderer",
+        cellEditor="agCheckboxCellEditor",
+        width=110,
     )
     gb.configure_column(
         "Stat",
@@ -868,19 +836,19 @@ with stat_builder_container:
     time.sleep(0.1)
     
     grid_response = AgGrid(
-    stat_config_df,
-    gridOptions=grid_options,
-    height=grid_height,
-    width="100%",
-    theme=GRID_THEME,
-    custom_css=GRID_CUSTOM_CSS,
-    data_return_mode=DataReturnMode.AS_INPUT,
-    fit_columns_on_grid_load=True,
-    allow_unsafe_jscode=True,
-    enable_enterprise_modules=False,
-    key=grid_key,
-    update_on=["selectionChanged"],
-)
+        stat_config_df,
+        gridOptions=grid_options,
+        height=grid_height,
+        width="100%",
+        theme=GRID_THEME,
+        custom_css=GRID_CUSTOM_CSS,
+        data_return_mode=DataReturnMode.AS_INPUT,
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,
+        enable_enterprise_modules=False,
+        key=grid_key,
+        update_on=["selectionChanged"],
+    )
 
 grid_df = None
 if grid_response and grid_response.data is not None:
