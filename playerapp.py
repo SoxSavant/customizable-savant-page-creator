@@ -25,16 +25,16 @@ from st_aggrid import (
 
 def safe_aggrid(df, **kwargs):
     """
-    Retries AG Grid loading up to 3 times to avoid Streamlit component
-    handshake failures in production environments like Cloud Run.
+    Retries AG Grid loading to avoid Streamlit component handshake failures
+    in production environments.
     """
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             return AgGrid(df, **kwargs)
         except Exception:
-            if attempt == 2:
+            if attempt == 4:
                 raise  # rethrow after last attempt
-            time.sleep(0.3)
+            time.sleep(0.4 * (attempt + 1))
 
 
 GRID_THEME = "balham"
@@ -123,7 +123,6 @@ STAT_PRESETS = {
         "FRV",
         "OAA",
         "ARM",
-        "RANGE",
         "TZ",
         "UZR",
         "FRM",
