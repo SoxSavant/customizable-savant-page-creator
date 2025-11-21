@@ -88,6 +88,7 @@ st.markdown(
         .compare-card .player-name {
             font-size: var(--player-name-size);
             font-weight: 800;
+            line-height: 1.2;
             margin: .2rem 0 0 0;
         }
         .compare-card .player-meta {
@@ -2037,8 +2038,9 @@ if player_count == 2:
 else:
     headshot_width = f"clamp(110px, calc(80vw / {player_count + 1}), 140px)"
     headshot_col_width = f"clamp(125px, calc(84vw / {player_count + 1}), 160px)"
-    player_name_size = "clamp(1.0rem, 2vw, 1.15rem)"
-    player_meta_size = "clamp(0.95rem, 1.6vw, 1.05rem)"
+    # Smaller text for 3–4 player layouts
+    player_name_size = ".9rem"
+    player_meta_size = ".95rem"
 
 with right_col:
     if table_df.empty:
