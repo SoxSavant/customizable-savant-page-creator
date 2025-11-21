@@ -57,6 +57,8 @@ st.markdown(
             align-items: center;
             justify-items: center;
             width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
             margin-bottom: .2rem;
             gap: 0;
         }
@@ -68,6 +70,7 @@ st.markdown(
             flex: 0 1 var(--headshot-col-width);
             width: var(--headshot-col-width);
             max-width: var(--headshot-col-width);
+            min-width: var(--headshot-col-width);
             text-align: center;
             padding-top: .1rem;
         }
@@ -2031,10 +2034,10 @@ if player_count == 2:
     player_name_size = "1.35rem"
     player_meta_size = "1.3rem"
 else:
-    headshot_width = 130
-    headshot_col_width = 145
-    player_name_size = "1.1rem"
-    player_meta_size = "1.0rem"
+    headshot_width = f"clamp(110px, calc(80vw / {player_count + 1}), 140px)"
+    headshot_col_width = f"clamp(125px, calc(84vw / {player_count + 1}), 160px)"
+    player_name_size = "clamp(1.0rem, 2vw, 1.15rem)"
+    player_meta_size = "clamp(0.95rem, 1.6vw, 1.05rem)"
 
 with right_col:
     if table_df.empty:
