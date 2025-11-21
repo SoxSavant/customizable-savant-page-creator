@@ -58,7 +58,7 @@ st.markdown(
             justify-items: center;
             width: 100%;
             max-width: 100%;
-            overflow-x: auto;
+            overflow: hidden;
             margin-bottom: .2rem;
             gap: 0;
         }
@@ -67,10 +67,10 @@ st.markdown(
         }
 
         .compare-card .headshot-col {
-            flex: 0 1 var(--headshot-col-width);
-            width: var(--headshot-col-width);
+            flex: 1 1 auto;
+            width: auto;
             max-width: var(--headshot-col-width);
-            min-width: var(--headshot-col-width);
+            min-width: 0;
             text-align: center;
             padding-top: .1rem;
         }
@@ -79,7 +79,8 @@ st.markdown(
             background: #f2f2f2;
             border-radius: 4px;
             padding: 4px;
-            width: var(--headshot-img-width);
+            width: 100%;
+            max-width: var(--headshot-img-width);
             max-height: var(--headshot-img-width);
             height: auto;
             object-fit: contain;

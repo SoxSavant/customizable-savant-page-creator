@@ -1,3 +1,5 @@
+# This file tells gcloud/Cloud Build which local files to ignore when uploading.
+# Keep it in sync with .dockerignore.
 .git
 __pycache__/
 *.py[cod]
@@ -12,18 +14,10 @@ logs/
 *.swp
 *.swo
 *~
-
-# Streamlit/cache artifacts
 .streamlit/
-
-# Build outputs
 dist/
 build/
-
-# Python packaging
 *.egg-info/
 *.egg
-
-# IDE
 .vscode/
 .idea/
