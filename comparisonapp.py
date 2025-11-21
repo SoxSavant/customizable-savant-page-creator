@@ -1427,15 +1427,12 @@ with left_col:
 current_year = date.today().year
 years_desc = list(range(current_year, 1870, -1))
 MAX_PLAYERS = 4
-default_names = ["Mookie Betts", "Aaron Judge", "Jarren Duran", "Juan Soto"]
-# If mode increases, prefill new players and default them to single-season
+default_names = ["Mookie Betts", "Aaron Judge", "", ""]
+# If mode increases, default new players to single-season
 prev_count = st.session_state.get("comp_prev_player_count", 2)
 if player_count > prev_count:
     for idx in range(prev_count, player_count):
-        name_key = f"comp_player_{idx}"
         single_key = f"comp_single_year_{idx}"
-        if not st.session_state.get(name_key):
-            st.session_state[name_key] = default_names[idx] if idx < len(default_names) else ""
         st.session_state[single_key] = True
 st.session_state["comp_prev_player_count"] = player_count
 # Initialize state for all player slots up-front to avoid missing keys when switching modes.
@@ -1519,6 +1516,12 @@ with controls_container:
                 )
         year_ranges.append((min(year_start, year_end), max(year_start, year_end)))
 
+    # Ensure visible player slots have a default name before rendering inputs
+    for idx in range(player_count):
+        name_key = f"comp_player_{idx}"
+        if not st.session_state.get(name_key) and default_names[idx]:
+            st.session_state[name_key] = default_names[idx]
+
     input_cols = st.columns(player_count)
     player_inputs = []
     for idx in range(player_count):
@@ -1526,10 +1529,6 @@ with controls_container:
         name_key = f"comp_player_{idx}"
         id_key = f"comp_player_{idx}_id"
         mode_key = f"comp_player_{idx}_mode"
-        current_name = st.session_state.get(name_key, "")
-        if not current_name and default_names[idx]:
-            current_name = default_names[idx]
-            st.session_state[name_key] = current_name
         with input_cols[idx]:
             mode_val = st.selectbox(
                 f"Player {label} Input",
@@ -1537,7 +1536,7 @@ with controls_container:
                 key=mode_key,
             )
             if mode_val == "Name":
-                name_input = st.text_input(f"Player {label}", key=name_key, value=current_name)
+                name_input = st.text_input(f"Player {label}", key=name_key)
                 id_input = st.session_state.get(id_key, "")
             else:
                 id_input = st.text_input(f"Player {label} FanGraphs ID", key=id_key)
@@ -2018,6 +2017,7 @@ else:
     stat_col_width = shared_width
     player_col_width = shared_width
     grid_template = " ".join(["1fr"] * (player_count + 1))
+headshot_width = 200 if player_count == 2 else 150
 
 with right_col:
     if table_df.empty:
@@ -2032,7 +2032,7 @@ with right_col:
         if player_count == 2:
             # left player
             pdata = players_data[0]
-            img_html = f'<img src="{esc(pdata["headshot"])}" width="200" />' if pdata["headshot"] else ""
+            img_html = f'<img src="{esc(pdata["headshot"])}" width="{headshot_width}" />' if pdata["headshot"] else ""
             rows.extend([
                 '    <div class="headshot-col">',
                 f"      <div class=\"player-meta\"{meta_style}>{esc(str(pdata['year_label']))} | {esc(str(pdata['team']))}</div>",
@@ -2043,7 +2043,7 @@ with right_col:
             rows.append("    <div class=\"headshot-spacer\"></div>")
             # right player
             pdata = players_data[1]
-            img_html = f'<img src="{esc(pdata["headshot"])}" width="200" />' if pdata["headshot"] else ""
+            img_html = f'<img src="{esc(pdata["headshot"])}" width="{headshot_width}" />' if pdata["headshot"] else ""
             rows.extend([
                 '    <div class="headshot-col">',
                 f"      <div class=\"player-meta\"{meta_style}>{esc(str(pdata['year_label']))} | {esc(str(pdata['team']))}</div>",
@@ -2054,7 +2054,7 @@ with right_col:
         else:
             rows.append("    <div class=\"headshot-spacer\"></div>")
             for pdata in players_data:
-                img_html = f'<img src="{esc(pdata["headshot"])}" width="200" />' if pdata["headshot"] else ""
+                img_html = f'<img src="{esc(pdata["headshot"])}" width="{headshot_width}" />' if pdata["headshot"] else ""
                 rows.extend([
                     '    <div class="headshot-col">',
                     f"      <div class=\"player-meta\"{meta_style}>{esc(str(pdata['year_label']))} | {esc(str(pdata['team']))}</div>",
