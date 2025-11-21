@@ -2041,6 +2041,7 @@ else:
     # Smaller text for 3–4 player layouts
     player_name_size = ".9rem"
     player_meta_size = ".95rem"
+name_style_attr = f' style="font-size:{player_name_size}; line-height:1.1;"' if player_count > 2 else ""
 
 with right_col:
     if table_df.empty:
@@ -2059,7 +2060,7 @@ with right_col:
                 '    <div class="headshot-col">',
                 f"      <div class=\"player-meta\">{esc(str(pdata['year_label']))} | {esc(str(pdata['team']))}</div>",
                 f"      {img_html}",
-                f"      <div class=\"player-name\">{esc(pdata['display_name'])}</div>",
+                f"      <div class=\"player-name\"{name_style_attr}>{esc(pdata['display_name'])}</div>",
                 "    </div>",
             ])
             rows.append("    <div class=\"headshot-spacer\"></div>")
@@ -2070,7 +2071,7 @@ with right_col:
                 '    <div class="headshot-col">',
                 f"      <div class=\"player-meta\">{esc(str(pdata['year_label']))} | {esc(str(pdata['team']))}</div>",
                 f"      {img_html}",
-                f"      <div class=\"player-name\">{esc(pdata['display_name'])}</div>",
+                f"      <div class=\"player-name\"{name_style_attr}>{esc(pdata['display_name'])}</div>",
                 "    </div>",
             ])
         else:
@@ -2081,7 +2082,7 @@ with right_col:
                     '    <div class="headshot-col">',
                     f"      <div class=\"player-meta\">{esc(str(pdata['year_label']))} | {esc(str(pdata['team']))}</div>",
                     f"      {img_html}",
-                    f"      <div class=\"player-name\">{esc(pdata['display_name'])}</div>",
+                    f"      <div class=\"player-name\"{name_style_attr}>{esc(pdata['display_name'])}</div>",
                     "    </div>",
                 ])
         rows.extend([
