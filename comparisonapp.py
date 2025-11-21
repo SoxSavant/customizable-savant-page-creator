@@ -13,7 +13,7 @@ from pathlib import Path
 from pybaseball import batting_stats, fielding_stats, playerid_lookup, bwar_bat
 from pybaseball.statcast_fielding import statcast_outs_above_average
 import requests
-
+from bs4 import BeautifulSoup
 
 st.set_page_config(page_title="Player Comparison App", layout="wide")
 
@@ -295,20 +295,121 @@ def load_year(y: int) -> pd.DataFrame:
     return batting_stats(y, y, qual=0, split_seasons=False)
 
 
-def compute_team_display(team_values: list[str]) -> str:
-    placeholders = {"TOT", "- - -", "---", "--", "", "N/A"}
-    teams = [str(t).upper() for t in team_values if str(t).strip()]
-    valid = [t for t in teams if t not in placeholders]
-    if not valid:
-        if any(t == "TOT" for t in teams):
-            return "TOT"
-        if any(t == "- - -" for t in teams):
-            return "2+ Tms"
-        return teams[0] if teams else "N/A"
-    unique_valid = sorted(set(valid))
-    if len(unique_valid) == 1:
-        return unique_valid[0]
-    return f"{len(unique_valid)} Tms"
+def compute_team_display(teams: list[str]) -> str:
+    """
+    Convert a list of team codes into a display string.
+    """
+    if not teams:
+        return "N/A"
+    if len(teams) == 1:
+        return teams[0]       # Includes the collapsed "OAK/ATH"
+    return f"{len(teams)} Teams"
+
+
+def collapse_athletics(teams: list[str]) -> list[str]:
+    """
+    Collapse OAK + ATH into a single franchise for counting purposes
+    but preserve all other teams.
+    """
+    has_oak = "OAK" in teams
+    has_ath = "ATH" in teams
+
+    # If both appear, collapse them into one entry
+    if has_oak and has_ath:
+        new_list = [t for t in teams if t not in {"OAK", "ATH"}]
+        new_list.append("OAK/ATH")
+        return sorted(new_list)
+
+    # If only one of OAK or ATH appears → keep as-is
+    return teams
+
+
+
+VALID_TEAMS = {
+    "ARI","ATL","BAL","BOS","CHC","CIN","CLE","COL","CHW","DET",
+    "HOU","KCR","LAA","LAD","MIA","MIL","MIN","NYM","NYY",
+    "OAK","ATH","PHI","PIT","SDP","SEA","SFG","STL","TBR",
+    "TEX","TOR","WSN"
+}
+
+
+def normalize_team_code(team: str, year: int) -> str:
+    """
+    Normalize Athletics team codes depending on the year.
+    Before 2025 → OAK
+    2025+ → ATH
+    """
+    if not team:
+        return team
+
+    team = team.upper().strip()
+
+    if team in {"", "-", "--", "---", "- - -", "TOT"}:
+        return None
+
+    # Athletics → year-aware
+    if year < 2025:
+        if team in {"ATH", "OAK"}:
+            return "OAK"
+    else:
+        if team in {"ATH", "OAK"}:
+            return "ATH"
+
+    return team
+
+
+def get_player_teams_fangraphs(fg_id: int, start_year: int, end_year: int) -> list[str]:
+    """
+    Scrape Fangraphs batting tables and extract MLB team codes.
+    Handles:
+    - multiple teams in a year
+    - ATH/OAK transition
+    - split-season rows
+    """
+
+    import requests
+    from bs4 import BeautifulSoup
+
+    url = f"https://www.fangraphs.com/players/x/{fg_id}/stats?season=all"
+    r = requests.get(url, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    found = []
+
+    # Scan all tables (MLB + Minors + College)
+    for table in soup.find_all("table"):
+        for row in table.find_all("tr"):
+            cols = [c.get_text(strip=True) for c in row.find_all("td")]
+            if len(cols) < 2:
+                continue
+
+            # Year check
+            if not (cols[0].isdigit() and len(cols[0]) == 4):
+                continue
+
+            year = int(cols[0])
+            team_raw = cols[1].strip()
+            # Ensure this is a Major League row
+            league = cols[2] if len(cols) > 2 else ""
+            if league != "MLB":
+                continue
+
+            if team_raw not in VALID_TEAMS:
+                continue
+
+            if start_year <= year <= end_year:
+                team_norm = normalize_team_code(team_raw, year)
+                if team_norm:
+                    found.append(team_norm)
+
+    # Unique + alphabetical
+    unique = sorted(set(found))
+
+    # 👇 Collapse OAK + ATH → OAK/ATH
+    collapsed = collapse_athletics(unique)
+
+    return collapsed
+
 
 
 def aggregate_player_group(grp: pd.DataFrame, name: str | None = None) -> dict:
@@ -323,10 +424,8 @@ def aggregate_player_group(grp: pd.DataFrame, name: str | None = None) -> dict:
         ids = grp["IDfg"].dropna()
         if not ids.empty:
             result["IDfg"] = ids.iloc[0]
-    teams = grp["Team"].dropna().astype(str).tolist() if "Team" in grp.columns else []
-    display = compute_team_display(teams)
-    result["Team"] = display
-    result["TeamDisplay"] = display
+    result["Team"] = "None"
+    result["TeamDisplay"] = "None"
     numeric_cols = [
         col for col in grp.columns
         if pd.api.types.is_numeric_dtype(grp[col]) and col not in {"IDfg"}
@@ -742,19 +841,43 @@ def normalize_display_team(team_value: str) -> str:
 
 @st.cache_data(show_spinner=False, ttl=900)
 def load_player_batting_profile(fg_id: int, start_year: int, end_year: int) -> pd.Series | None:
-    # For spans, always build from per-year data so Age can be a range.
-    frames: list[pd.DataFrame] = []
+    """
+    Load the player's batting profile for either a single season or a multi-year span.
+    Also attaches corrected Team / TeamDisplay based on direct Fangraphs HTML scraping.
+    """
+
+    # -----------------------------
+    # SINGLE YEAR
+    # -----------------------------
     if start_year == end_year:
         try:
             df = batting_stats(start_year, end_year, qual=0, split_seasons=False, players=str(fg_id))
         except Exception:
             df = None
+
         if df is not None and not df.empty:
             row = df.iloc[0].copy()
-            row["TeamDisplay"] = normalize_display_team(str(row.get("Team", "")).strip())
+
+            # Pull real teams from HTML
+            team_values = get_player_teams_fangraphs(fg_id, start_year, end_year)
+            if team_values:
+                team_display = compute_team_display(team_values)
+                row["Team"] = team_display
+                row["TeamDisplay"] = team_display
+            else:
+                # fallback: use pybaseball Team column
+                row["TeamDisplay"] = normalize_display_team(str(row.get("Team", "")).strip())
+
             row["Name"] = str(row.get("Name", "")).strip()
             return row
 
+        # if single year but no data, fall through to multi-year logic
+        # (rare, but harmless)
+
+    # -----------------------------
+    # MULTI-YEAR SPAN
+    # -----------------------------
+    frames = []
     for year in range(start_year, end_year + 1):
         try:
             yearly = batting_stats(year, year, qual=0, split_seasons=False, players=str(fg_id))
@@ -762,11 +885,23 @@ def load_player_batting_profile(fg_id: int, start_year: int, end_year: int) -> p
             yearly = None
         if yearly is not None and not yearly.empty:
             frames.append(yearly)
+
     if not frames:
         return None
+
     combined = pd.concat(frames, ignore_index=True)
+
     aggregated = aggregate_player_group(combined)
+
+    # Pull actual teams from HTML scraper
+    team_values = get_player_teams_fangraphs(fg_id, start_year, end_year)
+    if team_values:
+        team_display = compute_team_display(team_values)
+        aggregated["Team"] = team_display
+        aggregated["TeamDisplay"] = team_display
+
     return pd.Series(aggregated)
+
 
 
 @st.cache_data(show_spinner=False, ttl=900)
@@ -1878,3 +2013,4 @@ with right_col:
         st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
         st.caption("TZ records ended in 2001, DRS started in 2002")
         st.caption("Rookies with accents, initials, etc. may not return a headshot")
+      
