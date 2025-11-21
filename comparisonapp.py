@@ -39,31 +39,31 @@ st.markdown(
             box-shadow: 0 4px 20px rgba(0,0,0,0.12);
             color: #111111;
         }
-        .compare-card h3 {
-            margin: 0;
-            text-align: center;
-            color: #7b0d0d;
-            font-weight: 800;
-        }
+
         .compare-card .headshot-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr 195px 1fr; /* match the stat column width in the middle */
             align-items: center;
-            justify-content: space-around;
-            gap: 16rem;
+            justify-items: center;
             margin-bottom: .2rem;
+            gap: 0;
         }
+        .compare-card .headshot-spacer {
+            width: 0px;
+        }
+
         .compare-card .headshot-col {
             flex: 0 0 220px;
             text-align: center;
             padding-top: .1rem;
         }
-        .compare-card .headshot-col img {
+        .compare-card .headshot-col img { /*headshot size, background color, border */
             border: 1px solid #d0d0d0;
             background: #f2f2f2;
             border-radius: 4px;
             padding: 4px;
-            width: 230px;
-            max-height: 230px;
+            width: 202px;
+            max-height: 202px;
             height: auto;
             object-fit: contain;
         }
@@ -77,29 +77,31 @@ st.markdown(
             margin: 0 0 0.3rem 0;
             font-size: 1.3rem;
         }
-        .compare-table {
+        .compare-table { /* sets the line height, width, font size */
             width: 100%;
             border-collapse: collapse;
             font-size: 14px;
             table-layout: fixed;
             line-height: 1.5;
         }
-        .compare-table th, .compare-table td {
+        .compare-table td {
+            width: auto;
+        }
+        .compare-table th, .compare-table td { /* centers text, white background for rows */
             border: 1px solid #d0d0d0;
-            padding: 3px 6px;
+            padding: 3px 3px;
             text-align: center;
             background: #ffffff;
             color: #111111;
-            width: 33.333%;
         }
-        .compare-table th {
+        .compare-table th { /* Overall Stats row */
             background: #f1f1f1;
             font-weight: 800;
             color: #7b0d0d;
             font-size: 15px;
             line-height: 1.2;
         }
-        .compare-table .overall-row th {
+        .compare-table .overall-row th { /* More styling for Overall Stats row */
             background: #f1f1f1;
             color: #7b0d0d;
             font-weight: 800;
@@ -110,12 +112,13 @@ st.markdown(
             border-left: 1px solid #d0d0d0;
             border-right: 1px solid #d0d0d0;
         }
-        .compare-table .stat-col {
+        .compare-table .stat-col { /* stats rows */
             font-weight: 700;
             background: #fafafa;
             color: #111;
+            width: 60px;
         }
-        .compare-table .best {
+        .compare-table .best { /* highlights the winner in green */
             background: #E5F1E4;
             font-weight: 800;
             color: #111111;
@@ -127,7 +130,7 @@ st.markdown(
 
 title_col, meta_col = st.columns([3, 1])
 with title_col:
-    st.title("Custom Player Comparison")
+    st.title("Custom Hitter Comparison")
 with meta_col:
     st.markdown(
         """
@@ -193,7 +196,6 @@ STAT_PRESETS = {
         "K%",
         "BB%",
         "DRS",
-        "FRV",
     ],
     "Fielding": [
         "DRS",
@@ -367,9 +369,6 @@ def get_player_teams_fangraphs(fg_id: int, start_year: int, end_year: int) -> li
     - split-season rows
     """
 
-    import requests
-    from bs4 import BeautifulSoup
-
     url = f"https://www.fangraphs.com/players/x/{fg_id}/stats?season=all"
     r = requests.get(url, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
@@ -409,8 +408,6 @@ def get_player_teams_fangraphs(fg_id: int, start_year: int, end_year: int) -> li
     collapsed = collapse_athletics(unique)
 
     return collapsed
-
-
 
 def aggregate_player_group(grp: pd.DataFrame, name: str | None = None) -> dict:
     result: dict[str, object] = {}
@@ -910,8 +907,6 @@ def load_player_batting_profile(fg_id: int, start_year: int, end_year: int) -> p
 
     return pd.Series(aggregated)
 
-
-
 @st.cache_data(show_spinner=False, ttl=900)
 def load_player_fielding_profile(fg_id: int, start_year: int, end_year: int) -> dict[str, float]:
     try:
@@ -1394,7 +1389,7 @@ def get_headshot_url(name: str, df: pd.DataFrame) -> str | None:
 
 
 # --------------------- Layout containers ---------------------
-left_col, right_col = st.columns([1.2, 1.55])
+left_col, right_col = st.columns([1, 1])
 
 with left_col:
     controls_container = st.container()
@@ -1571,13 +1566,13 @@ else:
 
 if not player_a_fg_id or player_a_fg_id <= 0:
     if player_a_mode == "Name":
-        st.error(f"Could not resolve FanGraphs ID for {player_a_name}. Check the spelling or use the ID input.")
+        st.error(f"Could not find data for for {player_a_name}. Check the spelling or use the ID input.")
     else:
         st.error("Player A FanGraphs ID must be a positive integer.")
     st.stop()
 if not player_b_fg_id or player_b_fg_id <= 0:
     if player_b_mode == "Name":
-        st.error(f"Could not resolve FanGraphs ID for {player_b_name}. Check the spelling or use the ID input.")
+        st.error(f"Could not find data for {player_b_name}. Check the spelling or use the ID input.")
     else:
         st.error("Player B FanGraphs ID must be a positive integer.")
     st.stop()
@@ -1794,7 +1789,7 @@ with stat_builder_container:
     st.markdown("### Customize stats")
     st.markdown(
         "<div style='margin-bottom: -0.25rem; color: inherit; font-size: 0.9rem;'>"
-        "Drag to reorder. Use the drop downs to add or remove stats."
+        "Use the drop downs to add or remove stats and the arrows to reorder them."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1844,11 +1839,9 @@ with stat_builder_container:
 
     current_stat_config = normalize_stat_rows(st.session_state.get(stat_state_key, preset_base_config), preset_base_config)
 
-    st.markdown("#### Order & visibility")
-
     st.markdown('<div class="stat-table">', unsafe_allow_html=True)
     st.markdown('<div class="table-header">', unsafe_allow_html=True)
-    header_cols = st.columns([0.25, 0.25, 0.25, 0.25])
+    header_cols = st.columns([0.25, 0.25, .25, 1])
     header_cols[0].markdown("**Up**")
     header_cols[1].markdown("**Down**")
     header_cols[2].markdown("**Stat**")
@@ -1857,9 +1850,9 @@ with stat_builder_container:
 
     for idx, row in enumerate(current_stat_config):
         st.markdown('<div class="table-row">', unsafe_allow_html=True)
-        up_col, down_col, stat_col, show_col = st.columns([0.25, 0.25, 0.25, 0.25])
+        up_col, down_col, stat_col, show_col = st.columns([0.25, 0.25, .25, 1])
         with up_col:
-            st.button(
+             st.button(
                 "▲",
                 key=f"stat_up_{idx}",
                 disabled=idx == 0,
@@ -2019,6 +2012,7 @@ with right_col:
             f"      {img_a}",
             f"      <div class=\"player-name\">{esc(player_a_display_name)}</div>",
             "    </div>",
+            "    <div class=\"headshot-spacer\"></div>",
             "    <div class=\"headshot-col\">",
             f"      <div class=\"player-meta\">{esc(str(year_b_label))} | {esc(str(player_b_team))}</div>",
             f"      {img_b}",
