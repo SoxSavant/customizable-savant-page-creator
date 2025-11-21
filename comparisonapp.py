@@ -931,7 +931,12 @@ def load_player_fielding_profile(fg_id: int, start_year: int, end_year: int) -> 
     return result
 
 
-def build_player_profile(fg_id: int, start_year: int, end_year: int) -> pd.Series | None:
+def build_player_profile(
+    fg_id: int,
+    start_year: int,
+    end_year: int,
+    mlbam_override: int | None = None,
+) -> pd.Series | None:
     batting = load_player_batting_profile(fg_id, start_year, end_year)
     if batting is None:
         return None
@@ -939,10 +944,14 @@ def build_player_profile(fg_id: int, start_year: int, end_year: int) -> pd.Serie
     for key, val in fielding.items():
         batting[key] = val
     name_value = str(batting.get("Name", "")).strip()
-    mlbam_id = None
+    mlbam_id = mlbam_override
     bbref_id = None
     if name_value:
-        mlbam_id, bbref_id = lookup_mlbam_id(name_value, return_bbref=True)
+        lookup_mlbam, lookup_bbref = lookup_mlbam_id(name_value, return_bbref=True)
+        if mlbam_id is None:
+            mlbam_id = lookup_mlbam
+        bbref_id = lookup_bbref
+    batting["mlbam_override"] = mlbam_id if mlbam_id is not None else np.nan
     name_key = normalize_statcast_name(str(batting.get("Name", "")))
     if name_key:
         statcast = load_statcast_fielding_span(start_year, end_year, target_names=(name_key,))
@@ -1215,7 +1224,7 @@ def fetch_bbref_headshot(bref_id: str | None) -> str | None:
 
 
 def get_headshot_url(name: str, df: pd.DataFrame) -> str | None:
-    id_cols = ["mlbamid", "mlbam_id", "mlbam", "MLBID", "MLBAMID", "key_mlbam"]
+    id_cols = ["mlbam_override", "mlbamid", "mlbam_id", "mlbam", "MLBID", "MLBAMID", "key_mlbam"]
     fg_cols = ["playerid", "IDfg", "fg_id", "FGID"]
     bref_cols = ["key_bbref", "bbref_id", "BBREFID", "bref_id", "BREFID"]
 
@@ -1313,7 +1322,7 @@ def get_headshot_url(name: str, df: pd.DataFrame) -> str | None:
     target_clean = clean_name(name)
 
     candidate_cols = [
-        "mlbamid", "MLBID", "mlbam_id", "mlbam", "key_mlbam", "MLBAMID", "playerid"
+        "mlbam_override", "mlbamid", "MLBID", "mlbam_id", "mlbam", "key_mlbam", "MLBAMID", "playerid"
     ]
     for col in candidate_cols:
         if col in df.columns:
@@ -1463,6 +1472,14 @@ if "comp_player_a_id" not in st.session_state:
     st.session_state["comp_player_a_id"] = ""
 if "comp_player_b_id" not in st.session_state:
     st.session_state["comp_player_b_id"] = ""
+if "comp_player_a_mlbam" not in st.session_state:
+    st.session_state["comp_player_a_mlbam"] = ""
+if "comp_player_b_mlbam" not in st.session_state:
+    st.session_state["comp_player_b_mlbam"] = ""
+if "comp_player_a_mlbam_enabled" not in st.session_state:
+    st.session_state["comp_player_a_mlbam_enabled"] = False
+if "comp_player_b_mlbam_enabled" not in st.session_state:
+    st.session_state["comp_player_b_mlbam_enabled"] = False
 
 with controls_container:
     sel_a_col, sel_b_col = st.columns(2)
@@ -1495,6 +1512,26 @@ player_a_name = player_a_name_input.strip()
 player_b_name = player_b_name_input.strip()
 player_a_id_raw = str(player_a_id_input).strip()
 player_b_id_raw = str(player_b_id_input).strip()
+
+def parse_mlbam_override(raw: str, enabled: bool) -> int | None:
+    if not enabled:
+        return None
+    raw_val = str(raw).strip()
+    if not raw_val:
+        return None
+    try:
+        return int(raw_val)
+    except Exception:
+        return None
+
+mlbam_override_a = parse_mlbam_override(
+    st.session_state.get("comp_player_a_mlbam", ""),
+    st.session_state.get("comp_player_a_mlbam_enabled", False),
+)
+mlbam_override_b = parse_mlbam_override(
+    st.session_state.get("comp_player_b_mlbam", ""),
+    st.session_state.get("comp_player_b_mlbam_enabled", False),
+)
 
 if player_a_mode == "Name":
     if not player_a_name:
@@ -1537,8 +1574,8 @@ if not player_b_fg_id or player_b_fg_id <= 0:
         st.error("Player B FanGraphs ID must be a positive integer.")
     st.stop()
 
-player_a_row = build_player_profile(player_a_fg_id, *range_a)
-player_b_row = build_player_profile(player_b_fg_id, *range_b)
+player_a_row = build_player_profile(player_a_fg_id, *range_a, mlbam_override=mlbam_override_a)
+player_b_row = build_player_profile(player_b_fg_id, *range_b, mlbam_override=mlbam_override_b)
 if player_a_row is None or player_b_row is None:
     st.error("Could not load data for one of the selected players.")
     st.stop()
@@ -1557,6 +1594,11 @@ for metric in FIELDING_STATS:
         df_a[metric] = pd.to_numeric(df_a[metric], errors="coerce")
     if metric in df_b.columns:
         df_b[metric] = pd.to_numeric(df_b[metric], errors="coerce")
+# Attach optional MLB overrides so headshots/other lookups can use them.
+if mlbam_override_a is not None:
+    df_a["mlbam_override"] = mlbam_override_a
+if mlbam_override_b is not None:
+    df_b["mlbam_override"] = mlbam_override_b
 player_a_team = player_a_row.get("TeamDisplay", normalize_display_team(player_a_row.get("Team", "")))
 player_b_team = player_b_row.get("TeamDisplay", normalize_display_team(player_b_row.get("Team", "")))
 year_a_label = f"{range_a[0]}" if range_a[0] == range_a[1] else f"{range_a[0]}-{range_a[1]}"
@@ -2009,8 +2051,25 @@ with right_col:
         ])
         rows_html = "\n".join(rows)
         st.markdown(rows_html, unsafe_allow_html=True)
+        with st.expander("Optional MLB ID overrides (use if bWAR/headshot is missing)", expanded=False):
+            override_cols = st.columns(2)
+            with override_cols[0]:
+                st.checkbox("Use MLB ID override", key="comp_player_a_mlbam_enabled")
+                st.text_input(
+                    "Player A MLB ID",
+                    key="comp_player_a_mlbam",
+                    placeholder="e.g. 608070",
+                    disabled=not st.session_state.get("comp_player_a_mlbam_enabled", False),
+                )
+            with override_cols[1]:
+                st.checkbox("Use MLB ID override", key="comp_player_b_mlbam_enabled")
+                st.text_input(
+                    "Player B MLB ID",
+                    key="comp_player_b_mlbam",
+                    placeholder="e.g. 123456",
+                    disabled=not st.session_state.get("comp_player_b_mlbam_enabled", False),
+                )
         st.caption("Screenshot to save")
-        st.caption("Find a player's Fangraphs ID in their Fangraphs profile URL")
+        st.caption("Find a player's Fangraphs/MLB ID in their Fangraphs/MLB profile URL")
         st.caption("TZ records ended in 2001, DRS started in 2002")
-        st.caption("Rookies with accents, initials, etc. may not return a headshot")
       
