@@ -1143,11 +1143,17 @@ with right_col:
     ax.set_yticks([])
     ax.axis("off")
 
+    # Render to both PNG (for on-page display) and PDF (for download) to reduce
+    # chances of blank renders on some hosted envs.
+    png_buffer = BytesIO()
+    fig.savefig(png_buffer, format="png", bbox_inches="tight", pad_inches=.25, dpi=220)
+    png_buffer.seek(0)
+
     pdf_buffer = BytesIO()
     fig.savefig(pdf_buffer, format="pdf", bbox_inches="tight", pad_inches=.25)
     pdf_buffer.seek(0)
 
-    st.pyplot(fig, use_container_width=True, clear_figure=True)
+    st.image(png_buffer, use_container_width=True)
     download_name = f"{player_name.replace(' ', '_')}_{year}_savant.pdf"
     st.download_button(
         "Download as PDF",
@@ -1155,3 +1161,6 @@ with right_col:
         file_name=download_name,
         mime="application/pdf",
     )
+    plt.close(fig)
+
+    st.caption("Percentiles based on players with at least 2.1 PA per team game, or 340 PA over a full season")
