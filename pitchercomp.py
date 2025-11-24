@@ -234,11 +234,11 @@ STAT_PRESETS = {
 }
 
 STAT_ALLOWLIST = [
-    "ERA", "xERA", "FIP", "xFIP", "IP", "G", "GS", "SO", "BB", "HBP", "HR", "K/9",
+    "ERA", "xERA", "FIP", "xFIP", "IP", "G", "GS", "SO", "BB", "HBP", "HR", "K/9", "Age",
     "BB/9", "HR/9", "BABIP", "LOB%",  "HR/FB", "vFA", "QS", "CG", "ShO",
     "SV", "K%", "BB%", "K-BB%", "AVG", "WHIP", "ERA-", "FIP-", "Barrel%", "HardHit%", "EV",
     "GB/FB", "GB%", "FB%", "SIERA", "O-Swing%", "Z-Swing%", "Swing%", "Contact%",
-    "Whiff%", "Pull%", "Cent%", "Oppo%", "bWAR", "Age", "WPA", "Clutch", "FA%", "SI%", "vSI%", "SL%", "vSL%",
+    "Whiff%", "Pull%", "Cent%", "Oppo%", "bWAR", "WPA", "Clutch", "FA%", "SI%", "vSI%", "SL%", "vSL%",
     "CU%", "vCU%", "CH%", "vCH", "F-Strike%", "Stuff+", "Location+", "Pitching+", "LD%",
 ]
 
