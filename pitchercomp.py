@@ -189,7 +189,7 @@ STAT_PRESETS = {
         "vFA",
         "EV",
         "O-Swing%",
-        "Contact%",
+        "Whiff%",
         "K%",
         "BB%",
         "Barrel%",
@@ -244,7 +244,6 @@ STAT_ALLOWLIST = [
 
 STAT_DISPLAY_NAMES = {
     "WAR": "fWAR",
-    "Contact%": "Whiff%",
 }
 def display_stat_name(stat) -> str:
     if stat is None:
@@ -263,6 +262,30 @@ RATE_STATS = {
     "Whiff%", "Pull%", "Cent%", "Oppo%", "Clutch", "FA%", "SI%", "vSI%", "SL%", "vSL%",
     "CU%", "vCU%", "CH%", "vCH", "F-Strike%",
 }
+
+def add_whiff_from_contact(stats: pd.Series | dict) -> pd.Series | dict:
+    """Attach Whiff% derived from Contact%, handling percent or decimal inputs."""
+    if stats is None:
+        return stats
+    try:
+        contact_raw = stats.get("Contact%")
+    except Exception:
+        return stats
+    if isinstance(contact_raw, str):
+        contact_raw = contact_raw.replace("%", "").strip()
+    try:
+        contact_val = float(contact_raw)
+    except (TypeError, ValueError):
+        return stats
+    if pd.isna(contact_val):
+        return stats
+    contact_pct = contact_val * 100 if contact_val <= 1 else contact_val
+    whiff_pct = 100 - contact_pct
+    try:
+        stats["Whiff%"] = whiff_pct
+    except Exception:
+        pass
+    return stats
 
 HEADSHOT_BASES = [
     # Standard silo path (real photos when they exist)
@@ -1190,6 +1213,8 @@ def build_player_profile(
             if not match.empty:
                 match_bwar = match
         pitching["bWAR"] = pd.to_numeric(match_bwar["bWAR"].iloc[0], errors="coerce")
+
+    pitching = add_whiff_from_contact(pitching)
 
     return pitching
 
@@ -2183,7 +2208,6 @@ label_map = {
     "HardHit%": "Hard Hit%",
     "WAR": "fWAR",
     "EV": "Avg Exit Velo",
-    "Contact%": "Whiff%",
 }
 lower_better = {"HardHit%", "Barrel%", "EV", "ERA", "xERA", "FIP", "xFIP", "BB", "HBP", "HR",
               "BB/9", "HR/9", "BABIP", "HR/FB", "BB%", "AVG", "WHIP", "ERA-", "FIP-", "Barrel%", 
