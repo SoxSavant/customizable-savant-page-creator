@@ -246,12 +246,7 @@ STAT_PRESETS = {
         "LD%",
     ],
     "Blank – Create your own": [
-        "Off", "Def", "BsR", "WAR", "Barrel%", "HardHit%", "EV", "MaxEV",
-    "wRC+", "wOBA", "xwOBA", "xBA", "xSLG", "OPS", "SLG", "OBP", "AVG", "ISO",
-    "BABIP", "G", "PA", "AB", "R", "RBI", "HR", "XBH", "H", "1B", "2B", "3B", "SB", "BB", "IBB", "SO",
-    "K%", "BB%", "K-BB%", "O-Swing%", "Z-Swing%", "Swing%", "Contact%", "WPA", "Clutch",
-    "Pull%", "Cent%", "Oppo%", "GB%", "FB%", "LD%", "LA",
-    "FRV", "OAA", "ARM", "RANGE", "DRS", "TZ", "FRM", "UZR", "bWAR", "Age",
+        "Age",
     ],
 }
 
