@@ -20,8 +20,6 @@ plt.rcdefaults()
 
 st.set_page_config(page_title="Custom Savant Page App", layout="wide")
 
-
-
 title_col, meta_col = st.columns([3, 1])
 with title_col:
     st.title("Custom Savant Page App")
